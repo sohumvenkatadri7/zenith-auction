@@ -1,0 +1,51 @@
+@import "tailwindcss";
+
+/* ── Neo-Brutalist Design Tokens ────────────────────────────────── */
+:root {
+  --background: #fafaf9; /* warm white */
+  --foreground: #171717;
+  --brutal-yellow: #facc15;
+  --brutal-black: #171717;
+  --brutal-white: #ffffff;
+  --brutal-red: #dc2626;
+  --brutal-green: #16a34a;
+  --brutal-gray: #a3a3a3;
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --font-sans: "Inter", "Geist", system-ui, -apple-system, sans-serif;
+  --font-mono: "Geist Mono", "JetBrains Mono", ui-monospace, monospace;
+}
+
+/* ── Global Reset ───────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+body {
+  margin: 0;
+  background: var(--background);
+  color: var(--foreground);
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* ── Base element styling for brutalist character ───────────────── */
+::selection {
+  background: var(--brutal-yellow);
+  color: var(--brutal-black);
+}
+
+/* Make images/buttons respect borders */
+img,
+button,
+input,
+textarea,
+select {
+  border-radius: 0; /* sharp brutalist corners */
+}
