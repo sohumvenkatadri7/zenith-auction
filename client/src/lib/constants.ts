@@ -3,8 +3,7 @@ export const NETWORK = {
   networkPassphrase: "Test SDF Network ; September 2015",
 } as const;
 
-export const CONTRACT_ADDRESS =
-  process.env.NEXT_PUBLIC_CONTRACT_ADDRESS || "";
+export const CONTRACT_ADDRESS = "CA46B2LHS67SLQGONAF3OPSQEZN5KXI26I2YH6SQTXWX75SV5S5JQPSW" ;
 
 export const STELLAR_EXPIRATION_MARGIN = 300; // seconds added to TimeBounds
 

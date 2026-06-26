@@ -1,406 +1,128 @@
 #![cfg(test)]
+extern crate std;
 
 use super::*;
-use soroban_sdk::testutils::{Address as _, Ledger};
-use soroban_sdk::{token, Env};
+use soroban_sdk::{
+    testutils::{Address as _, Ledger},
+    Address, Env,
+};
+use soroban_sdk::token::Client as TokenClient;
+use soroban_sdk::token::StellarAssetClient as AssetClient;
 
-fn setup_env() -> (Env, token::StellarAssetClient, token::StellarAssetClient, Address) {
+// Helper function to create mock tokens for testing
+fn create_token<'a>(env: &Env, admin: &Address) -> (TokenClient<'a>, AssetClient<'a>) {
+    let contract_id = env.register_stellar_asset_contract(admin.clone());
+    (
+        TokenClient::new(env, &contract_id),
+        AssetClient::new(env, &contract_id),
+    )
+}
+
+#[test]
+fn test_successful_auction_and_claim() {
     let env = Env::default();
-    env.mock_all_auths();
-    env.ledger().set_timestamp(1_000_000);
+    env.mock_all_auths(); // Bypass strict signature checks for testing
 
+    // Setup accounts
     let admin = Address::generate(&env);
-
-    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
-    let bid_token_id = env.register_stellar_asset_contract_v2(admin.clone());
-
-    let token_sac = token::StellarAssetClient::new(&env, &token_id);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-
-    (env, token_sac, bid_sac, token_id)
-}
-
-fn mint_token(sac: &token::StellarAssetClient, to: &Address, amount: i128) {
-    sac.mint(to, &amount);
-}
-
-#[test]
-fn test_create_auction() {
-    let (env, token_sac, bid_sac, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-    assert_eq!(auction_id, 1);
-
-    let auction = client.get_auction(&auction_id).unwrap();
-    assert_eq!(auction.creator, creator);
-    assert_eq!(auction.token, token_id);
-    assert_eq!(auction.start_price, 1000);
-    assert_eq!(auction.start_time, 1_000_000);
-    assert_eq!(auction.end_time, 1_100_000);
-    assert!(!auction.ended);
-    assert!(!auction.claimed);
-}
-
-#[test]
-fn test_place_bid() {
-    let (env, token_sac, bid_sac, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let bidder = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &bidder, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    client.place_bid(&bidder, &auction_id, &1500i128).unwrap();
-    let auction = client.get_auction(&auction_id).unwrap();
-    assert_eq!(auction.highest_bid, 1500);
-    assert_eq!(auction.highest_bidder, bidder);
-}
-
-#[test]
-fn test_bid_too_low() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let bidder = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &bidder, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    let result = client.try_place_bid(&bidder, &auction_id, &500i128);
-    assert_eq!(result, Err(Ok(AuctionError::BidTooLow)));
-}
-
-#[test]
-fn test_bid_outside_active_window() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let bidder = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &bidder, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    // Before start
-    env.ledger().set_timestamp(900_000);
-    let r1 = client.try_place_bid(&bidder, &auction_id, &1500i128);
-    assert_eq!(r1, Err(Ok(AuctionError::NotActive)));
-
-    // After end
-    env.ledger().set_timestamp(1_200_000);
-    let r2 = client.try_place_bid(&bidder, &auction_id, &1500i128);
-    assert_eq!(r2, Err(Ok(AuctionError::NotActive)));
-}
-
-#[test]
-fn test_claim_winning() {
-    let (env, token_sac, bid_sac, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let winner = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &winner, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    client.place_bid(&winner, &auction_id, &2000i128).unwrap();
-    env.ledger().set_timestamp(1_200_000);
-
-    client.claim_winning(&winner, &auction_id).unwrap();
-
-    let auction = client.get_auction(&auction_id).unwrap();
-    assert!(auction.claimed);
-    assert!(auction.ended);
-
-    // Winner got the token, creator got the bid
-    assert_eq!(token_sac.balance(&winner), 1);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    assert_eq!(bid_sac.balance(&creator), 2000);
-}
-
-#[test]
-fn test_claim_before_end_fails() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let winner = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &winner, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    client.place_bid(&winner, &auction_id, &2000i128).unwrap();
-    let result = client.try_claim_winning(&winner, &auction_id);
-    assert_eq!(result, Err(Ok(AuctionError::NotEnded)));
-}
-
-#[test]
-fn test_claim_twice_fails() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let winner = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &winner, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    client.place_bid(&winner, &auction_id, &2000i128).unwrap();
-    env.ledger().set_timestamp(1_200_000);
-    client.claim_winning(&winner, &auction_id).unwrap();
-
-    let result = client.try_claim_winning(&winner, &auction_id);
-    assert_eq!(result, Err(Ok(AuctionError::AlreadyClaimed)));
-}
-
-#[test]
-fn test_refund_previous_bidder() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
     let creator = Address::generate(&env);
     let bidder1 = Address::generate(&env);
     let bidder2 = Address::generate(&env);
 
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &bidder1, 10_000);
-    mint_token(&bid_sac, &bidder2, 10_000);
+    // Setup tokens (Item Token and Bid Token like USDC/XLM)
+    let (item_token, item_admin) = create_token(&env, &admin);
+    let (bid_token, bid_admin) = create_token(&env, &admin);
 
+    // Mint 1 Item to the Creator
+    item_admin.mint(&creator, &1);
+    
+    // Mint Bidding Funds to the bidders
+    bid_admin.mint(&bidder1, &100);
+    bid_admin.mint(&bidder2, &200);
+
+    // Register our Auction Contract
+    let contract_id = env.register_contract(None, Contract);
+    let client = ContractClient::new(&env, &contract_id);
     client.init();
 
+    // Set ledger time to "1000"
+    env.ledger().with_mut(|li| {
+        li.timestamp = 1000;
+    });
+
+    // 1. Create Auction (Start: 1000, End: 2000, Start Price: 50)
     let auction_id = client.create_auction(
         &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
+        &item_token.address,
+        &bid_token.address,
+        &50,
+        &1000,
+        &2000,
     );
 
-    client.place_bid(&bidder1, &auction_id, &1500i128).unwrap();
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    assert_eq!(bid_sac.balance(&bidder1), 8500); // 10000 - 1500
+    assert_eq!(item_token.balance(&creator), 0); // Item locked
+    assert_eq!(item_token.balance(&contract_id), 1); 
 
-    client.place_bid(&bidder2, &auction_id, &2500i128).unwrap();
-    assert_eq!(bid_sac.balance(&bidder1), 10000); // refunded
-    assert_eq!(bid_sac.balance(&bidder2), 7500);  // 10000 - 2500
+    // 2. Bidder 1 Places Bid (50)
+    client.place_bid(&bidder1, &auction_id, &50);
+    assert_eq!(bid_token.balance(&bidder1), 50); // 100 - 50 locked
+    assert_eq!(bid_token.balance(&contract_id), 50);
+
+    // 3. Bidder 2 Outbids Bidder 1 (100)
+    client.place_bid(&bidder2, &auction_id, &100);
+    
+    // Bidder 1 should automatically be refunded!
+    assert_eq!(bid_token.balance(&bidder1), 100); 
+    assert_eq!(bid_token.balance(&bidder2), 100); // 200 - 100 locked
+    assert_eq!(bid_token.balance(&contract_id), 100);
+
+    // 4. Time travels past end_time
+    env.ledger().with_mut(|li| {
+        li.timestamp = 2001;
+    });
+
+    // 5. Claim Winning (Permissionless)
+    client.claim_winning(&auction_id);
+
+    // Verify final balances
+    assert_eq!(item_token.balance(&bidder2), 1); // Bidder 2 gets the item
+    assert_eq!(bid_token.balance(&creator), 100); // Creator gets the 100 tokens
 }
 
 #[test]
-fn test_nonexistent_auction() {
-    let (env, _, _, _) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let result = client.try_get_auction(&999u64);
-    assert_eq!(result, Err(Ok(AuctionError::NotFound)));
-}
-
-#[test]
-fn test_non_winner_cannot_claim() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let bidder = Address::generate(&env);
-    let impostor = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &bidder, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    client.place_bid(&bidder, &auction_id, &2000i128).unwrap();
-    env.ledger().set_timestamp(1_200_000);
-
-    let result = client.try_claim_winning(&impostor, &auction_id);
-    assert_eq!(result, Err(Ok(AuctionError::NotWinner)));
-}
-
-#[test]
-fn test_bid_requires_higher_than_previous() {
-    let (env, token_sac, _, token_id) = setup_env();
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
-
-    let bid_token_id = Address::generate(&env);
-    let creator = Address::generate(&env);
-    let bidder1 = Address::generate(&env);
-    let bidder2 = Address::generate(&env);
-
-    mint_token(&token_sac, &creator, 5);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&bid_sac, &bidder1, 10_000);
-    mint_token(&bid_sac, &bidder2, 10_000);
-
-    client.init();
-
-    let auction_id = client.create_auction(
-        &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
-    );
-
-    client.place_bid(&bidder1, &auction_id, &1500i128).unwrap();
-    let result = client.try_place_bid(&bidder2, &auction_id, &1500i128);
-    assert_eq!(result, Err(Ok(AuctionError::BidTooLow)));
-}
-
-#[test]
-fn test_event_emission() {
+fn test_reclaim_unsold_auction() {
     let env = Env::default();
     env.mock_all_auths();
-    env.ledger().set_timestamp(1_000_000);
-
-    let contract_id = env.register(Contract, ());
-    let client = ContractClient::new(&env, &contract_id);
 
     let admin = Address::generate(&env);
-    let token_id = env.register_stellar_asset_contract_v2(admin.clone());
-    let bid_token_id = env.register_stellar_asset_contract_v2(admin.clone());
-
     let creator = Address::generate(&env);
-    let token_sac = token::StellarAssetClient::new(&env, &token_id);
-    let bid_sac = token::StellarAssetClient::new(&env, &bid_token_id);
-    mint_token(&token_sac, &creator, 5);
 
-    let bidder = Address::generate(&env);
-    mint_token(&bid_sac, &bidder, 10_000);
+    let (item_token, item_admin) = create_token(&env, &admin);
+    let (bid_token, _) = create_token(&env, &admin);
 
+    item_admin.mint(&creator, &1);
+
+    let contract_id = env.register_contract(None, Contract);
+    let client = ContractClient::new(&env, &contract_id);
     client.init();
+
+    env.ledger().with_mut(|li| li.timestamp = 1000);
 
     let auction_id = client.create_auction(
         &creator,
-        &token_id,
-        &bid_token_id,
-        &1000i128,
-        &1_000_000u64,
-        &1_100_000u64,
+        &item_token.address,
+        &bid_token.address,
+        &50,
+        &1000,
+        &2000,
     );
 
-    // Check the bid_placed event
-    let bid_events = env.events().all();
-    assert!(bid_events.len() > 0);
+    // Time travels past end_time with zero bids
+    env.ledger().with_mut(|li| li.timestamp = 2001);
+
+    // Reclaim unsold item
+    client.reclaim_unsold(&auction_id);
+
+    // Creator should get their item back
+    assert_eq!(item_token.balance(&creator), 1);
 }

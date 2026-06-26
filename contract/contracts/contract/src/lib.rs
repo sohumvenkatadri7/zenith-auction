@@ -1,6 +1,6 @@
 #![no_std]
 use soroban_sdk::{
-    contract, contracterror, contractimpl, contracttype, token, Address, Env, Symbol,
+    contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env,
 };
 
 #[contracterror]
@@ -14,6 +14,7 @@ pub enum AuctionError {
     NotActive = 5,
     NotWinner = 6,
     NoBids = 7,
+    HasBids = 8,
 }
 
 #[contracttype]
@@ -38,6 +39,40 @@ pub enum DataKey {
     Auction(u64),
 }
 
+// --- NEW: MACRO-BASED EVENT STRUCTS ---
+
+// When you use #[contractevent], the snake_case name of the struct 
+// automatically becomes the primary topic (e.g., "auction_created")
+
+#[contractevent]
+pub struct AuctionCreated {
+    pub creator: Address,
+    pub auction_id: u64,
+}
+
+#[contractevent]
+pub struct BidPlaced {
+    pub auction_id: u64,
+    pub bidder: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct AuctionClaimed {
+    pub auction_id: u64,
+    pub winner: Address,
+    pub creator: Address,
+    pub amount: i128,
+}
+
+#[contractevent]
+pub struct AuctionReclaimed {
+    pub auction_id: u64,
+    pub creator: Address,
+}
+
+// ---------------------------------------
+
 #[contract]
 pub struct Contract;
 
@@ -58,6 +93,7 @@ impl Contract {
     ) -> u64 {
         creator.require_auth();
 
+        // Lock the item being auctioned into the contract
         token::Client::new(&env, &token).transfer(
             &creator,
             &env.current_contract_address(),
@@ -77,7 +113,7 @@ impl Contract {
             bid_token,
             start_price,
             highest_bid: 0i128,
-            highest_bidder: creator.clone(),
+            highest_bidder: creator.clone(), // Defaults to creator until a bid is placed
             start_time,
             end_time,
             ended: false,
@@ -87,7 +123,13 @@ impl Contract {
         env.storage().instance().set(&DataKey::Auction(id), &auction);
         env.storage().instance().set(&DataKey::NextId, &(id + 1));
 
-        env.events().publish((Symbol::new(&env, "auction_created"),), (creator, id));
+        // Publish the struct event
+        AuctionCreated {
+            creator,
+            auction_id: id,
+        }
+        .publish(&env);
+        
         id
     }
 
@@ -118,11 +160,12 @@ impl Contract {
         } else {
             auction.highest_bid + 1
         };
+        
         if amount < min_bid {
             return Err(AuctionError::BidTooLow);
         }
 
-        // Refund previous highest bidder
+        // Refund the previous highest bidder automatically
         if auction.highest_bid > 0 {
             token::Client::new(&env, &auction.bid_token).transfer(
                 &env.current_contract_address(),
@@ -131,7 +174,7 @@ impl Contract {
             );
         }
 
-        // Transfer new bid
+        // Transfer the new bid into the contract
         token::Client::new(&env, &auction.bid_token).transfer(
             &bidder,
             &env.current_contract_address(),
@@ -140,24 +183,24 @@ impl Contract {
 
         auction.highest_bid = amount;
         auction.highest_bidder = bidder.clone();
-        env.storage()
-            .instance()
-            .set(&DataKey::Auction(auction_id), &auction);
-
-        env.events().publish(
-            (Symbol::new(&env, "bid_placed"),),
-            (auction_id, bidder, amount),
-        );
+        
+        env.storage().instance().set(&DataKey::Auction(auction_id), &auction);
+        
+        // Publish the struct event
+        BidPlaced {
+            auction_id,
+            bidder,
+            amount,
+        }
+        .publish(&env);
+        
         Ok(())
     }
 
     pub fn claim_winning(
         env: Env,
-        caller: Address,
         auction_id: u64,
     ) -> Result<(), AuctionError> {
-        caller.require_auth();
-
         let mut auction: Auction = env
             .storage()
             .instance()
@@ -170,9 +213,6 @@ impl Contract {
         if auction.claimed {
             return Err(AuctionError::AlreadyClaimed);
         }
-        if caller != auction.highest_bidder {
-            return Err(AuctionError::NotWinner);
-        }
         if auction.highest_bid == 0 {
             return Err(AuctionError::NoBids);
         }
@@ -180,27 +220,73 @@ impl Contract {
         auction.ended = true;
         auction.claimed = true;
 
-        // Transfer token to winner
+        // Route the NFT/Token to the winner
         token::Client::new(&env, &auction.token).transfer(
             &env.current_contract_address(),
-            &caller,
+            &auction.highest_bidder,
             &1i128,
         );
-        // Transfer bid to creator
+        
+        // Route the money to the creator
         token::Client::new(&env, &auction.bid_token).transfer(
             &env.current_contract_address(),
             &auction.creator,
             &auction.highest_bid,
         );
 
-        env.storage()
-            .instance()
-            .set(&DataKey::Auction(auction_id), &auction);
+        env.storage().instance().set(&DataKey::Auction(auction_id), &auction);
+        
+        // Publish the struct event
+        AuctionClaimed {
+            auction_id,
+            winner: auction.highest_bidder.clone(),
+            creator: auction.creator.clone(),
+            amount: auction.highest_bid,
+        }
+        .publish(&env);
+        
+        Ok(())
+    }
 
-        env.events().publish(
-            (Symbol::new(&env, "auction_claimed"),),
-            (auction_id, caller, auction.creator, auction.highest_bid),
+    pub fn reclaim_unsold(
+        env: Env,
+        auction_id: u64,
+    ) -> Result<(), AuctionError> {
+        let mut auction: Auction = env
+            .storage()
+            .instance()
+            .get(&DataKey::Auction(auction_id))
+            .ok_or(AuctionError::NotFound)?;
+
+        if env.ledger().timestamp() <= auction.end_time {
+            return Err(AuctionError::NotEnded);
+        }
+        if auction.claimed {
+            return Err(AuctionError::AlreadyClaimed);
+        }
+        if auction.highest_bid > 0 {
+            return Err(AuctionError::HasBids);
+        }
+
+        auction.ended = true;
+        auction.claimed = true;
+
+        // Return the NFT/Token back to the creator
+        token::Client::new(&env, &auction.token).transfer(
+            &env.current_contract_address(),
+            &auction.creator,
+            &1i128,
         );
+
+        env.storage().instance().set(&DataKey::Auction(auction_id), &auction);
+        
+        // Publish the struct event
+        AuctionReclaimed {
+            auction_id,
+            creator: auction.creator.clone(),
+        }
+        .publish(&env);
+        
         Ok(())
     }
 
@@ -212,4 +298,5 @@ impl Contract {
     }
 }
 
+#[cfg(test)]
 mod test;

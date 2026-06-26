@@ -68,15 +68,6 @@ function addKnownAuctionId(id: bigint) {
 
 /**
  * Core hook for interacting with the Auction Soroban contract.
- *
- * Provides methods for:
- *  - `initContract`   — initialise the contract (set NextId)
- *  - `createAuction`  — create a new auction
- *  - `placeBid`       — place a bid on an active auction
- *  - `claimWinning`   — claim the token after auction ends
- *  - `getAuctionDetails` — read a single auction's state
- *  - `fetchAllAuctions`  — fetch all known auctions
- *  - `pollBidEvents`  — poll the RPC for new `bid_placed` events
  */
 export function useAuction() {
   const { address, signTx } = useWalletStore();
@@ -100,6 +91,7 @@ export function useAuction() {
       const server = getServer();
       const contract = getContract();
       const caller = address;
+      
       if (!server || !contract || !caller)
         throw new Error("Wallet not connected or contract not configured");
 
@@ -126,6 +118,7 @@ export function useAuction() {
         const assembled = assembleTransaction(tx, sim);
         const preparedTx = assembled.build();
 
+        // Using the global kit from the store for multi-wallet support
         const signedXdr = await signTx(
           preparedTx.toXDR(),
           NETWORK.networkPassphrase,
@@ -172,21 +165,10 @@ export function useAuction() {
   //  WRITE METHODS
   // ──────────────────────────────────────────────
 
-  /** Initialise the contract (sets NextId = 1). */
   const initContract = useCallback(async (): Promise<string> => {
     return submitTx("init", []);
   }, [submitTx]);
 
-  /**
-   * Create a new auction.
-   *
-   * @param creator       – wallet address of the creator
-   * @param token         – the token contract address being auctioned
-   * @param bidToken      – the token contract address used for bidding
-   * @param startPrice    – starting price (bigint, in token's smallest unit)
-   * @param startTime     – auction start time (unix seconds)
-   * @param endTime       – auction end time (unix seconds)
-   */
   const createAuction = useCallback(
     async (
       creator: string,
@@ -205,19 +187,14 @@ export function useAuction() {
         nativeToScVal(endTime, { type: "u64" }),
       ];
       await submitTx("create_auction", params);
-
-      // The contract returns the new auction id, but we can't easily extract
-      // it from the transaction hash. Use the known-ids list instead.
       return 0n;
     },
     [submitTx],
   );
 
-  /** Place a bid on an active auction. */
   const placeBid = useCallback(
     async (auctionId: bigint, amount: bigint): Promise<string> => {
       const params = [
-        // FIX: Contract expects bidder Address as first param
         new Address(address!).toScVal(),
         nativeToScVal(auctionId, { type: "u64" }),
         nativeToScVal(amount, { type: "i128" }),
@@ -227,28 +204,30 @@ export function useAuction() {
     [submitTx, address],
   );
 
-  /** Claim the winning token after an auction has ended. */
   const claimWinning = useCallback(
     async (auctionId: bigint): Promise<string> => {
       const params = [
-        // FIX: Contract expects caller Address as first param
-        new Address(address!).toScVal(),
         nativeToScVal(auctionId, { type: "u64" }),
       ];
       return submitTx("claim_winning", params);
     },
-    [submitTx, address],
+    [submitTx],
+  );
+
+  const reclaimUnsold = useCallback(
+    async (auctionId: bigint): Promise<string> => {
+      const params = [
+        nativeToScVal(auctionId, { type: "u64" }),
+      ];
+      return submitTx("reclaim_unsold", params);
+    },
+    [submitTx],
   );
 
   // ──────────────────────────────────────────────
   //  READ METHODS
   // ──────────────────────────────────────────────
 
-  /**
-   * Fetch the current state of a single auction from the contract.
-   *
-   * @param opts.manageState  – whether to update global loading/error (default true)
-   */
   const getAuctionDetails = useCallback(
     async (
       auctionId: bigint,
@@ -265,7 +244,6 @@ export function useAuction() {
       }
 
       try {
-        // Use a dummy source account for read-only simulation
         const source = await server.getAccount(
           "GBZC6Y2Y7Q3ZQ2Y4QZJ2XZ3Z5YXZ6Z7Z2Y4QZJ2XZ3Z5YXZ6Z7Z2Y4",
         );
@@ -295,10 +273,7 @@ export function useAuction() {
           return null;
         }
 
-        const raw = scValToNative(sim.result.retval) as Record<
-          string,
-          unknown
-        >;
+        const raw = scValToNative(sim.result.retval) as Record<string, unknown>;
 
         const details: AuctionDetails = {
           id: BigInt(String(raw.id ?? auctionId.toString())),
@@ -328,7 +303,6 @@ export function useAuction() {
     [setAuction, setLoading, setError],
   );
 
-  /** Fetch all known auctions from the local registry. */
   const fetchAllAuctions = useCallback(async (): Promise<AuctionDetails[]> => {
     const ids = getKnownAuctionIds();
     if (ids.length === 0) {
@@ -340,7 +314,6 @@ export function useAuction() {
     setError(null);
 
     try {
-      // FIX: Pass manageState: false to avoid race conditions with inner loading toggles
       const results = await Promise.allSettled(
         ids.map((id) => getAuctionDetails(id, { manageState: false })),
       );
@@ -368,7 +341,6 @@ export function useAuction() {
   //  EVENT POLLING
   // ──────────────────────────────────────────────
 
-  /** Poll the RPC for `bid_placed` events emitted by the contract. */
   const pollBidEvents = useCallback(
     async (auctionId: string): Promise<void> => {
       const server = getServer();
@@ -389,11 +361,11 @@ export function useAuction() {
               type: "contract",
               contractIds: [CONTRACT_ADDRESS],
               topics: [
+                // Fixed wildcard bug: Only pass the exact symbol
                 [
                   nativeToScVal("bid_placed", { type: "symbol" }).toXDR(
                     "base64",
                   ),
-                  "*",
                 ],
               ],
             },
@@ -429,6 +401,7 @@ export function useAuction() {
     createAuction,
     placeBid,
     claimWinning,
+    reclaimUnsold,
     getAuctionDetails,
     fetchAllAuctions,
     pollBidEvents,
