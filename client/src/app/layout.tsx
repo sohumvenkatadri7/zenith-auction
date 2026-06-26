@@ -1,22 +1,22 @@
 import type { Metadata } from "next";
-import { Geist, Geist_Mono } from "next/font/google";
+import { JetBrains_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
 
-const geistSans = Geist({
-  variable: "--font-geist-sans",
+const mono = JetBrains_Mono({
+  variable: "--font-mono",
   subsets: ["latin"],
 });
 
-const geistMono = Geist_Mono({
-  variable: "--font-geist-mono",
+const sans = Inter({
+  variable: "--font-sans",
   subsets: ["latin"],
 });
 
 export const metadata: Metadata = {
-  title: "Live Auction — Soroban dApp",
+  title: "ZENITH // Live Auction Protocol",
   description:
-    "A Neo-Brutalist live auction dApp powered by Stellar Soroban smart contracts.",
+    "On-chain auction protocol powered by Stellar Soroban. Create, bid, settle.",
 };
 
 export default function RootLayout({
@@ -25,13 +25,10 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html
-      lang="en"
-      className={`${geistSans.variable} ${geistMono.variable} h-full antialiased`}
-    >
-      <body className="flex min-h-full flex-col">
+    <html lang="en" className={`${mono.variable} ${sans.variable}`}>
+      <body className="scanlines grid-bg flex min-h-screen flex-col bg-[#0a0a0f] text-[#e8e8f0]">
         <Navbar />
-        {children}
+        <div className="flex min-h-screen flex-col">{children}</div>
       </body>
     </html>
   );

@@ -3,14 +3,17 @@
 import { create } from "zustand";
 
 export interface AuctionDetails {
+  id: bigint;
   creator: string;
-  tokenAddress: string;
+  token: string;
+  bidToken: string;
   startPrice: bigint;
-  minIncrement: bigint;
-  endTime: number; // ledger timestamp (seconds)
-  currentBid: bigint;
-  highestBidder: string | null;
+  highestBid: bigint;
+  highestBidder: string;
+  startTime: number;
+  endTime: number;
   ended: boolean;
+  claimed: boolean;
 }
 
 export interface BidEvent {
@@ -21,13 +24,18 @@ export interface BidEvent {
 }
 
 interface AuctionState {
+  /** Currently viewed auction details */
   auction: AuctionDetails | null;
+  /** List of all known auctions (for home page) */
+  auctions: AuctionDetails[];
   bidHistory: BidEvent[];
   isLoading: boolean;
   error: string | null;
   lastPolledLedger: number;
 
   setAuction: (details: AuctionDetails) => void;
+  setAuctions: (auctions: AuctionDetails[]) => void;
+  updateAuction: (details: AuctionDetails) => void;
   setBidHistory: (events: BidEvent[]) => void;
   appendBid: (event: BidEvent) => void;
   setLoading: (loading: boolean) => void;
@@ -38,6 +46,7 @@ interface AuctionState {
 
 const initialState = {
   auction: null,
+  auctions: [],
   bidHistory: [],
   isLoading: false,
   error: null,
@@ -48,6 +57,14 @@ export const useAuctionStore = create<AuctionState>((set) => ({
   ...initialState,
 
   setAuction: (details) => set({ auction: details }),
+  setAuctions: (auctions) => set({ auctions }),
+  updateAuction: (details) =>
+    set((state) => ({
+      auctions: state.auctions.map((a) =>
+        a.id === details.id ? details : a,
+      ),
+      auction: state.auction?.id === details.id ? details : state.auction,
+    })),
   setBidHistory: (events) => set({ bidHistory: events }),
   appendBid: (event) =>
     set((state) => ({ bidHistory: [...state.bidHistory, event] })),

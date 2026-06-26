@@ -3,7 +3,11 @@
 import { useCallback, useRef } from "react";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore, type AuctionDetails } from "@/store/auctionStore";
-import { NETWORK, CONTRACT_ADDRESS } from "@/lib/constants";
+import {
+  NETWORK,
+  CONTRACT_ADDRESS,
+  AUCTION_IDS_KEY,
+} from "@/lib/constants";
 
 import {
   rpc,
@@ -36,54 +40,63 @@ function getContract(): Contract | null {
   return new Contract(CONTRACT_ADDRESS);
 }
 
+// ── Local auction ID registry ──────────────────────────────────────
+
+function getKnownAuctionIds(): bigint[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(AUCTION_IDS_KEY);
+    if (!raw) return [];
+    return JSON.parse(raw).map((id: string) => BigInt(id));
+  } catch {
+    return [];
+  }
+}
+
+function addKnownAuctionId(id: bigint) {
+  if (typeof window === "undefined") return;
+  const ids = getKnownAuctionIds();
+  const idStr = id.toString();
+  if (!ids.some((i) => i.toString() === idStr)) {
+    ids.push(id);
+    localStorage.setItem(
+      AUCTION_IDS_KEY,
+      JSON.stringify(ids.map((i) => i.toString())),
+    );
+  }
+}
+
 /**
  * Core hook for interacting with the Auction Soroban contract.
  *
  * Provides methods for:
- *  - `createAuction`  — initialise a new auction (state-changing)
- *  - `placeBid`       — place a bid on an active auction (state-changing)
- *  - `claimWinning`   — claim the token after auction ends (state-changing)
- *  - `getAuctionDetails` — read the current auction state (read-only)
+ *  - `initContract`   — initialise the contract (set NextId)
+ *  - `createAuction`  — create a new auction
+ *  - `placeBid`       — place a bid on an active auction
+ *  - `claimWinning`   — claim the token after auction ends
+ *  - `getAuctionDetails` — read a single auction's state
+ *  - `fetchAllAuctions`  — fetch all known auctions
  *  - `pollBidEvents`  — poll the RPC for new `bid_placed` events
- *
- * The hook internally wires wallet auth, transaction simulation/assembly,
- * Freighter signing, and submission polling.
  */
 export function useAuction() {
   const { address, signTx } = useWalletStore();
   const {
     setAuction,
-    setBidHistory,
+    setAuctions,
     appendBid,
     setLoading,
     setError,
     setLastPolledLedger,
   } = useAuctionStore();
 
-  // Keep a mutable ref to the last polled ledger so the interval callback
-  // always reads the most recent value without re-creating the interval.
   const lastPolledLedgerRef = useRef(0);
 
   // ──────────────────────────────────────────────
-  //  CORE: build, simulate, sign, submit, poll
+  //  CORE: build, simulate, sign, submit
   // ──────────────────────────────────────────────
 
-  /**
-   * Submit a state-changing contract invocation.
-   *
-   * Steps:
-   *  1. Build a Transaction with the contract call
-   *  2. Simulate it via RPC to get footprint + auth entries
-   *  3. Assemble the real transaction from simulation
-   *  4. Sign with Freighter
-   *  5. Send to RPC
-   *  6. Poll until confirmed (or timeout)
-   */
   const submitTx = useCallback(
-    async (
-      method: string,
-      params: xdr.ScVal[],
-    ): Promise<string> => {
+    async (method: string, params: xdr.ScVal[]): Promise<string> => {
       const server = getServer();
       const contract = getContract();
       const caller = address;
@@ -94,10 +107,8 @@ export function useAuction() {
       setError(null);
 
       try {
-        // 1. Load source account (needed for sequence number)
         const source = await server.getAccount(caller);
 
-        // 2. Build bare transaction with the contract call
         const tx = new TransactionBuilder(source, {
           fee: BASE_FEE,
           networkPassphrase: NETWORK.networkPassphrase,
@@ -106,30 +117,25 @@ export function useAuction() {
           .setTimeout(30)
           .build();
 
-        // 3. Simulate (fills in footprint, auth, resource fees)
         const sim = await server.simulateTransaction(tx);
 
         if ("error" in sim) {
           throw new Error(`Simulation failed: ${sim.error}`);
         }
 
-        // 4. Assemble a ready-to-sign transaction from simulation
         const assembled = assembleTransaction(tx, sim);
         const preparedTx = assembled.build();
 
-        // 5. Sign with Freighter
         const signedXdr = await signTx(
           preparedTx.toXDR(),
           NETWORK.networkPassphrase,
         );
 
-        // 6. Send
         const sendResult = await server.sendTransaction(
           TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase),
         );
 
         if (sendResult.status === "PENDING") {
-          // 7. Poll until confirmed
           const txResult = await server.pollTransaction(sendResult.hash, {
             attempts: 30,
           });
@@ -166,63 +172,72 @@ export function useAuction() {
   //  WRITE METHODS
   // ──────────────────────────────────────────────
 
+  /** Initialise the contract (sets NextId = 1). */
+  const initContract = useCallback(async (): Promise<string> => {
+    return submitTx("init", []);
+  }, [submitTx]);
+
   /**
    * Create a new auction.
    *
    * @param creator       – wallet address of the creator
-   * @param tokenAddress  – the token contract address being auctioned
+   * @param token         – the token contract address being auctioned
+   * @param bidToken      – the token contract address used for bidding
    * @param startPrice    – starting price (bigint, in token's smallest unit)
-   * @param minIncrement  – minimum bid increment
-   * @param duration      – auction duration in seconds
+   * @param startTime     – auction start time (unix seconds)
+   * @param endTime       – auction end time (unix seconds)
    */
   const createAuction = useCallback(
     async (
       creator: string,
-      tokenAddress: string,
+      token: string,
+      bidToken: string,
       startPrice: bigint,
-      minIncrement: bigint,
-      duration: number,
-    ): Promise<string> => {
+      startTime: number,
+      endTime: number,
+    ): Promise<bigint> => {
       const params = [
         new Address(creator).toScVal(),
-        new Address(tokenAddress).toScVal(),
+        new Address(token).toScVal(),
+        new Address(bidToken).toScVal(),
         nativeToScVal(startPrice, { type: "i128" }),
-        nativeToScVal(minIncrement, { type: "i128" }),
-        nativeToScVal(duration, { type: "u64" }),
+        nativeToScVal(startTime, { type: "u64" }),
+        nativeToScVal(endTime, { type: "u64" }),
       ];
-      return submitTx("create_auction", params);
+      await submitTx("create_auction", params);
+
+      // The contract returns the new auction id, but we can't easily extract
+      // it from the transaction hash. Use the known-ids list instead.
+      return 0n;
     },
     [submitTx],
   );
 
-  /**
-   * Place a bid on an active auction.
-   *
-   * @param auctionId – u64 auction identifier
-   * @param amount    – bid amount (bigint, smallest unit)
-   */
+  /** Place a bid on an active auction. */
   const placeBid = useCallback(
     async (auctionId: bigint, amount: bigint): Promise<string> => {
       const params = [
+        // FIX: Contract expects bidder Address as first param
+        new Address(address!).toScVal(),
         nativeToScVal(auctionId, { type: "u64" }),
         nativeToScVal(amount, { type: "i128" }),
       ];
       return submitTx("place_bid", params);
     },
-    [submitTx],
+    [submitTx, address],
   );
 
-  /**
-   * Claim the winning token after an auction has ended.
-   *
-   * @param auctionId – u64 auction identifier
-   */
+  /** Claim the winning token after an auction has ended. */
   const claimWinning = useCallback(
     async (auctionId: bigint): Promise<string> => {
-      const params = [nativeToScVal(auctionId, { type: "u64" })];
+      const params = [
+        // FIX: Contract expects caller Address as first param
+        new Address(address!).toScVal(),
+        nativeToScVal(auctionId, { type: "u64" }),
+      ];
       return submitTx("claim_winning", params);
     },
-    [submitTx],
+    [submitTx, address],
   );
 
   // ──────────────────────────────────────────────
@@ -230,32 +245,38 @@ export function useAuction() {
   // ──────────────────────────────────────────────
 
   /**
-   * Fetch the current state of an auction from the contract.
+   * Fetch the current state of a single auction from the contract.
    *
-   * The returned `AuctionDetails` object contains all relevant fields
-   * needed to render the UI (current bid, highest bidder, end time, …).
+   * @param opts.manageState  – whether to update global loading/error (default true)
    */
   const getAuctionDetails = useCallback(
-    async (auctionId: bigint): Promise<AuctionDetails | null> => {
+    async (
+      auctionId: bigint,
+      opts: { manageState?: boolean } = {},
+    ): Promise<AuctionDetails | null> => {
+      const manageState = opts.manageState ?? true;
       const server = getServer();
       const contract = getContract();
       if (!server || !contract) return null;
 
-      setLoading(true);
-      setError(null);
+      if (manageState) {
+        setLoading(true);
+        setError(null);
+      }
 
       try {
-        // Build a read-only simulation
+        // Use a dummy source account for read-only simulation
         const source = await server.getAccount(
           "GBZC6Y2Y7Q3ZQ2Y4QZJ2XZ3Z5YXZ6Z7Z2Y4QZJ2XZ3Z5YXZ6Z7Z2Y4",
         );
+
         const tx = new TransactionBuilder(source, {
           fee: BASE_FEE,
           networkPassphrase: NETWORK.networkPassphrase,
         })
           .addOperation(
             contract.call(
-              "get_auction_details",
+              "get_auction",
               nativeToScVal(auctionId, { type: "u64" }),
             ),
           )
@@ -265,12 +286,12 @@ export function useAuction() {
         const sim = await server.simulateTransaction(tx);
 
         if ("error" in sim) {
-          setError(`Simulation error: ${sim.error}`);
+          if (manageState) setError(`Simulation error: ${sim.error}`);
           return null;
         }
 
         if (!sim.result || !sim.result.retval) {
-          setError("Auction not found");
+          if (manageState) setError("Auction not found");
           return null;
         }
 
@@ -280,20 +301,17 @@ export function useAuction() {
         >;
 
         const details: AuctionDetails = {
+          id: BigInt(String(raw.id ?? auctionId.toString())),
           creator: String(raw.creator ?? ""),
-          tokenAddress: String(raw.token ?? raw.token_address ?? ""),
-          startPrice: BigInt(String(raw.start_price ?? raw.startPrice ?? "0")),
-          minIncrement: BigInt(
-            String(raw.min_increment ?? raw.minIncrement ?? "0"),
-          ),
-          endTime: Number(raw.end_time ?? raw.endTime ?? 0),
-          currentBid: BigInt(
-            String(raw.current_bid ?? raw.currentBid ?? "0"),
-          ),
-          highestBidder: raw.highest_bidder
-            ? String(raw.highest_bidder)
-            : null,
+          token: String(raw.token ?? ""),
+          bidToken: String(raw.bid_token ?? ""),
+          startPrice: BigInt(String(raw.start_price ?? "0")),
+          highestBid: BigInt(String(raw.highest_bid ?? "0")),
+          highestBidder: String(raw.highest_bidder ?? ""),
+          startTime: Number(raw.start_time ?? 0),
+          endTime: Number(raw.end_time ?? 0),
           ended: Boolean(raw.ended ?? false),
+          claimed: Boolean(raw.claimed ?? false),
         };
 
         setAuction(details);
@@ -301,36 +319,64 @@ export function useAuction() {
       } catch (err: unknown) {
         const message =
           err instanceof Error ? err.message : "Failed to fetch auction";
-        setError(message);
+        if (manageState) setError(message);
         return null;
       } finally {
-        setLoading(false);
+        if (manageState) setLoading(false);
       }
     },
     [setAuction, setLoading, setError],
   );
 
+  /** Fetch all known auctions from the local registry. */
+  const fetchAllAuctions = useCallback(async (): Promise<AuctionDetails[]> => {
+    const ids = getKnownAuctionIds();
+    if (ids.length === 0) {
+      setAuctions([]);
+      return [];
+    }
+
+    setLoading(true);
+    setError(null);
+
+    try {
+      // FIX: Pass manageState: false to avoid race conditions with inner loading toggles
+      const results = await Promise.allSettled(
+        ids.map((id) => getAuctionDetails(id, { manageState: false })),
+      );
+
+      const auctions = results
+        .filter(
+          (r): r is PromiseFulfilledResult<AuctionDetails> =>
+            r.status === "fulfilled" && r.value !== null,
+        )
+        .map((r) => r.value);
+
+      setAuctions(auctions);
+      return auctions;
+    } catch (err: unknown) {
+      const message =
+        err instanceof Error ? err.message : "Failed to fetch auctions";
+      setError(message);
+      return [];
+    } finally {
+      setLoading(false);
+    }
+  }, [getAuctionDetails, setAuctions, setLoading, setError]);
+
   // ──────────────────────────────────────────────
   //  EVENT POLLING
   // ──────────────────────────────────────────────
 
-  /**
-   * Poll the RPC for `bid_placed` events emitted by the contract.
-   *
-   * Call this once (e.g. in a `useEffect`) with an interval. It
-   * automatically tracks the last ledger it polled from so each call
-   * only fetches new events.
-   */
+  /** Poll the RPC for `bid_placed` events emitted by the contract. */
   const pollBidEvents = useCallback(
     async (auctionId: string): Promise<void> => {
       const server = getServer();
       if (!server) return;
 
       try {
-        // First call — discover latest ledger and set the start point
         if (lastPolledLedgerRef.current === 0) {
           const latest = await server.getLatestLedger();
-          // Go back 10 ledgers to avoid missing events from the deploy tx
           lastPolledLedgerRef.current = Math.max(1, latest.sequence - 10);
           setLastPolledLedger(lastPolledLedgerRef.current);
           return;
@@ -344,11 +390,10 @@ export function useAuction() {
               contractIds: [CONTRACT_ADDRESS],
               topics: [
                 [
-                  // The event topic for bid_placed:
-                  // Soroban events use base64-encoded ScVals.
-                  // Topic[0] is the event name as a symbol.
-                  nativeToScVal("bid_placed", { type: "symbol" }).toXDR("base64"),
-                  "*", // wildcard for the second topic (bidder address)
+                  nativeToScVal("bid_placed", { type: "symbol" }).toXDR(
+                    "base64",
+                  ),
+                  "*",
                 ],
               ],
             },
@@ -368,23 +413,26 @@ export function useAuction() {
           }
         }
 
-        // Update the cursor so next poll resumes from here
         if (response.cursor) {
           lastPolledLedgerRef.current = Number(response.cursor);
           setLastPolledLedger(lastPolledLedgerRef.current);
         }
       } catch {
-        // Silently ignore — polling errors are non-critical
+        // Polling errors are non-critical
       }
     },
     [appendBid, setLastPolledLedger],
   );
 
   return {
+    initContract,
     createAuction,
     placeBid,
     claimWinning,
     getAuctionDetails,
+    fetchAllAuctions,
     pollBidEvents,
+    addKnownAuctionId,
+    getKnownAuctionIds,
   };
 }

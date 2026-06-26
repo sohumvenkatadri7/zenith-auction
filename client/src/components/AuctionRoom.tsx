@@ -4,143 +4,90 @@ import { useEffect, useState, useCallback } from "react";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore } from "@/store/auctionStore";
 import { useAuction } from "@/hooks/useAuction";
+import { formatAmount, formatDuration } from "@/lib/format";
 import BidButton from "./BidButton";
 
-/**
- * AuctionRoom — main page component showing a live auction.
- *
- * Renders:
- *  - Countdown timer (synchronised to ledger time)
- *  - Current highest bid + bidder
- *  - Bid input & submit button (via `BidButton`)
- *  - Claim button (when auction has ended and caller is winner)
- *  - Real-time event feed via `pollBidEvents` (no page refresh needed)
- *
- * The component is marked `'use client'` so it can hold all interactive
- * state, intervals, and wallet interaction.
- */
-export default function AuctionRoom() {
+interface AuctionRoomProps {
+  auctionId: bigint;
+}
+
+export default function AuctionRoom({ auctionId }: AuctionRoomProps) {
   const { address } = useWalletStore();
   const { auction, isLoading, error, bidHistory } = useAuctionStore();
   const { placeBid, claimWinning, getAuctionDetails, pollBidEvents } =
     useAuction();
 
-  // Hard-coded auction ID for this demo — in a real app this would come
-  // from the URL params or a list of active auctions.
-  const AUCTION_ID = 1n;
-
-  // ── Countdown state (seconds remaining) ──────────────────────────
   const [timeLeft, setTimeLeft] = useState<number | null>(null);
 
-  // ── Initial data load ────────────────────────────────────────────
   useEffect(() => {
-    getAuctionDetails(AUCTION_ID);
-  }, [getAuctionDetails, AUCTION_ID]);
+    getAuctionDetails(auctionId);
+  }, [getAuctionDetails, auctionId]);
 
-  // ── Countdown tick (every second) ────────────────────────────────
   useEffect(() => {
     if (!auction) return;
-
     const tick = () => {
-      // The auction's endTime is a ledger timestamp (Unix seconds).
-      // We approximate using the browser clock, correcting the offset
-      // once when the auction is first loaded.
       const now = Math.floor(Date.now() / 1000);
-      const remaining = Math.max(0, auction.endTime - now);
-      setTimeLeft(remaining);
+      setTimeLeft(Math.max(0, auction.endTime - now));
     };
-
-    tick(); // immediate first tick
+    tick();
     const id = setInterval(tick, 1000);
     return () => clearInterval(id);
   }, [auction]);
 
-  // ── Event polling for real-time bid updates ──────────────────────
-  // Polls the RPC every 5 s for new `bid_placed` events. When a new bid
-  // is detected, we re-fetch the full auction details to keep the UI in sync.
   useEffect(() => {
     if (!address) return;
-
-    pollBidEvents(String(AUCTION_ID));
-
-    const interval = setInterval(() => {
-      pollBidEvents(String(AUCTION_ID));
-    }, 5000);
-
+    pollBidEvents(String(auctionId));
+    const interval = setInterval(() => pollBidEvents(String(auctionId)), 5000);
     return () => clearInterval(interval);
-  }, [address, pollBidEvents, AUCTION_ID]);
+  }, [address, pollBidEvents, auctionId]);
 
-  // Re-fetch details whenever a new bid event arrives
   useEffect(() => {
-    if (bidHistory.length > 0) {
-      getAuctionDetails(AUCTION_ID);
-    }
-  }, [bidHistory.length, getAuctionDetails, AUCTION_ID]);
+    if (bidHistory.length > 0) getAuctionDetails(auctionId);
+  }, [bidHistory.length, getAuctionDetails, auctionId]);
 
-  // ── Bid handler ──────────────────────────────────────────────────
   const handleBid = useCallback(
     async (amount: string) => {
-      // Convert user-friendly amount to the smallest unit.
-      // For 7-decimal tokens: multiply by 10_000_000.
       const decimals = 7;
       const parsed = BigInt(Math.round(Number(amount) * 10 ** decimals));
-      await placeBid(AUCTION_ID, parsed);
-      // Refresh auction details after a successful bid
-      await getAuctionDetails(AUCTION_ID);
+      await placeBid(auctionId, parsed);
+      await getAuctionDetails(auctionId);
     },
-    [placeBid, getAuctionDetails, AUCTION_ID],
+    [placeBid, getAuctionDetails, auctionId],
   );
 
-  // ── Claim handler ────────────────────────────────────────────────
   const handleClaim = useCallback(async () => {
-    await claimWinning(AUCTION_ID);
-    await getAuctionDetails(AUCTION_ID);
-  }, [claimWinning, getAuctionDetails, AUCTION_ID]);
+    await claimWinning(auctionId);
+    await getAuctionDetails(auctionId);
+  }, [claimWinning, getAuctionDetails, auctionId]);
 
-  // ── Format helpers ───────────────────────────────────────────────
-  const formatTime = (seconds: number): string => {
-    const d = Math.floor(seconds / 86400);
-    const h = Math.floor((seconds % 86400) / 3600);
-    const m = Math.floor((seconds % 3600) / 60);
-    const s = seconds % 60;
-    const parts = [];
-    if (d > 0) parts.push(`${d}d`);
-    parts.push(`${String(h).padStart(2, "0")}h`);
-    parts.push(`${String(m).padStart(2, "0")}m`);
-    parts.push(`${String(s).padStart(2, "0")}s`);
-    return parts.join(" ");
-  };
-
-  const formatAmount = (val: bigint): string => {
-    const decimals = 7;
-    const divisor = 10n ** BigInt(decimals);
-    const whole = val / divisor;
-    const frac = val % divisor;
-    return `${whole}.${String(frac).padStart(decimals, "0")}`;
-  };
-
-  // ── Loading / empty states ───────────────────────────────────────
+  // ── Loading ───────────────────────────────────────────
   if (isLoading && !auction) {
     return (
       <div className="flex flex-1 items-center justify-center p-12">
-        <div className="flex items-center gap-3 text-lg font-bold">
-          <span className="inline-block h-6 w-6 animate-spin rounded-full border-2 border-black border-t-transparent" />
-          Loading auction…
+        <div className="flex items-center gap-3">
+          <span className="inline-block h-4 w-4 animate-spin border-2 border-[#44445a] border-t-[#3b82f6]" />
+          <span className="text-xs font-bold uppercase text-[#6b6b80]">
+            LOADING AUCTION...
+          </span>
         </div>
       </div>
     );
   }
 
+  // ── Error ─────────────────────────────────────────────
   if (error && !auction) {
     return (
       <div className="flex flex-1 items-center justify-center p-12">
-        <div className="max-w-md border-4 border-red-600 bg-red-50 p-6 text-center shadow-[6px_6px_0px_0px_#dc2626]">
-          <p className="text-lg font-bold text-red-900">{error}</p>
+        <div className="brutal-static max-w-md p-8 text-center">
+          <p className="mb-1 text-[10px] font-bold uppercase text-[#ef4444]">
+            [ERR]
+          </p>
+          <p className="mb-4 text-sm font-bold text-[#e8e8f0]">{error}</p>
           <button
-            onClick={() => getAuctionDetails(AUCTION_ID)}
-            className="mt-4 border-2 border-red-600 bg-white px-4 py-2 text-sm font-bold shadow-[2px_2px_0px_0px_#dc2626] transition hover:translate-x-0.5 hover:translate-y-0.5"
+            onClick={() => getAuctionDetails(auctionId)}
+            className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#3b82f6] hover:text-[#3b82f6]"
           >
-            Retry
+            RETRY
           </button>
         </div>
       </div>
@@ -150,118 +97,149 @@ export default function AuctionRoom() {
   if (!auction) {
     return (
       <div className="flex flex-1 items-center justify-center p-12">
-        <p className="text-lg font-bold text-gray-500">
-          No auction data available.
+        <p className="font-mono text-xs text-[#44445a]">
+          AUCTION_NOT_FOUND
         </p>
       </div>
     );
   }
 
-  const isEnded = auction.ended || (timeLeft !== null && timeLeft <= 0);
+  const now = Math.floor(Date.now() / 1000);
+  const isStarted = now >= auction.startTime;
+  const isEnded =
+    auction.ended || (timeLeft !== null && timeLeft <= 0) || now > auction.endTime;
   const isWinner =
-    address && auction.highestBidder
-      ? address === auction.highestBidder
-      : false;
+    address && auction.highestBidder ? address === auction.highestBidder : false;
 
-  // ── Main UI ──────────────────────────────────────────────────────
+  const statusCls = auction.claimed
+    ? "border-[#6b6b80] bg-[#6b6b80]/10 text-[#6b6b80]"
+    : isEnded
+      ? "border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]"
+      : isStarted
+        ? "border-[#22c55e] bg-[#22c55e]/10 text-[#22c55e]"
+        : "border-[#eab308] bg-[#eab308]/10 text-[#eab308]";
+
+  const statusLabel = auction.claimed
+    ? "SETTLED"
+    : isEnded
+      ? "ENDED"
+      : isStarted
+        ? "LIVE"
+        : "PENDING";
+
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-8 px-4 py-10">
-      {/* ── Countdown ──────────────────────────────────────────── */}
-      <section className="border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000]">
-        <h2 className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-500">
-          Time Remaining
+    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-6 py-10">
+      {/* ── Header ───────────────────────────────────── */}
+      <div className="flex items-center justify-between">
+        <h1 className="font-mono text-xs text-[#44445a]">
+          AUCTION #{auctionId.toString()}
+        </h1>
+        <span
+          className={`flex items-center gap-1.5 border px-2.5 py-0.5 text-[10px] font-bold uppercase ${statusCls}`}
+        >
+          {statusLabel === "LIVE" && (
+            <span className="live-dot" />
+          )}
+          {statusLabel}
+        </span>
+      </div>
+
+      {/* ── Countdown ─────────────────────────────────── */}
+      <section className="brutal-static p-6">
+        <h2 className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+          // {isStarted ? "TIME REMAINING" : "STARTS IN"}
         </h2>
         <p
-          className={`font-mono text-5xl font-black tracking-tight ${
-            isEnded ? "text-red-600" : "text-black"
+          className={`font-mono text-5xl font-bold tracking-tight ${
+            isEnded ? "text-[#ef4444]" : "text-[#e8e8f0]"
           }`}
         >
-          {timeLeft !== null ? formatTime(timeLeft) : "—"}
+          {timeLeft !== null ? formatDuration(timeLeft) : "--:--:--"}
         </p>
-        {isEnded && (
-          <span className="mt-1 inline-block border-2 border-red-600 bg-red-100 px-2 py-0.5 text-xs font-bold uppercase text-red-800">
-            Auction Ended
-          </span>
-        )}
       </section>
 
-      {/* ── Highest Bid ────────────────────────────────────────── */}
-      <section className="border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000]">
-        <h2 className="mb-1 text-xs font-bold uppercase tracking-widest text-gray-500">
-          Highest Bid
+      {/* ── Highest Bid ──────────────────────────────── */}
+      <section className="brutal-static p-6">
+        <h2 className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+          // HIGHEST BID
         </h2>
-        <p className="text-4xl font-black">
-          {auction.currentBid > 0n
-            ? `${formatAmount(auction.currentBid)}`
-            : `${formatAmount(auction.startPrice)}`}
+        <p className="text-4xl font-bold tracking-tight text-[#e8e8f0]">
+          {auction.highestBid > 0n
+            ? formatAmount(auction.highestBid)
+            : formatAmount(auction.startPrice)}
         </p>
-        {auction.highestBidder && (
-          <p className="mt-1 font-mono text-sm text-gray-600">
-            by{" "}
-            <span className="font-bold text-black">
-              {auction.highestBidder.slice(0, 4)}…
+        {auction.highestBidder && auction.highestBid > 0n ? (
+          <p className="mt-2 text-xs text-[#44445a]">
+            BIDDER:{" "}
+            <span className="font-bold text-[#6b6b80]">
+              {auction.highestBidder.slice(0, 4)}...
               {auction.highestBidder.slice(-4)}
             </span>
           </p>
-        )}
-        {!auction.highestBidder && (
-          <p className="mt-1 text-sm font-semibold text-yellow-700">
-            No bids yet — be the first!
+        ) : (
+          <p className="mt-2 text-xs font-bold text-[#3b82f6]">
+            NO BIDS YET
           </p>
         )}
       </section>
 
-      {/* ── Bid / Claim ────────────────────────────────────────── */}
-      <section className="border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000]">
+      {/* ── Bid / Claim ──────────────────────────────── */}
+      <section className="brutal-static p-6">
         {!address ? (
-          <p className="text-center text-sm font-bold text-gray-500">
-            Connect your wallet to place a bid.
+          <p className="text-center text-xs font-bold uppercase text-[#44445a]">
+            CONNECT WALLET TO BID
           </p>
+        ) : !isStarted ? (
+          <p className="text-center text-xs font-bold uppercase text-[#44445a]">
+            AUCTION HAS NOT STARTED
+          </p>
+        ) : isEnded && !auction.ended && auction.highestBid > 0n && isWinner ? (
+          <button
+            onClick={handleClaim}
+            disabled={isLoading}
+            className="w-full border-2 border-[#22c55e] bg-[#22c55e] px-6 py-3.5 text-sm font-bold uppercase tracking-wider text-black shadow-[4px_4px_0px_0px_#15803d] transition hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#15803d] disabled:opacity-60"
+          >
+            {isLoading ? "SETTLING..." : "[ CLAIM WINNING ]"}
+          </button>
         ) : isEnded ? (
-          isWinner && !auction.ended ? (
-            <button
-              onClick={handleClaim}
-              disabled={isLoading}
-              className="w-full border-2 border-green-700 bg-green-500 px-6 py-3 text-lg font-bold text-white shadow-[4px_4px_0px_0px_#15803d] transition hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-none disabled:opacity-60"
-            >
-              {isLoading ? "Claiming…" : "Claim Winning"}
-            </button>
-          ) : (
-            <p className="text-center text-sm font-bold text-gray-500">
-              {isWinner
-                ? "Auction ended. Claim your winnings above."
-                : `Auction ended. Winner: ${auction.highestBidder?.slice(0, 4)}…${auction.highestBidder?.slice(-4)}`}
-            </p>
-          )
+          <p className="text-center text-xs font-bold uppercase text-[#6b6b80]">
+            {isWinner
+              ? "AUCTION ENDED. CLAIM ABOVE."
+              : auction.highestBidder && auction.highestBid > 0n
+                ? `WINNER: ${auction.highestBidder.slice(0, 4)}...${auction.highestBidder.slice(-4)}`
+                : "AUCTION ENDED. NO BIDS."}
+          </p>
         ) : (
           <BidButton
             onBid={handleBid}
             disabled={isLoading}
             minAmount={formatAmount(
-              auction.currentBid > 0n
-                ? auction.currentBid + auction.minIncrement
+              auction.highestBid > 0n
+                ? auction.highestBid + 1n
                 : auction.startPrice,
             )}
           />
         )}
       </section>
 
-      {/* ── Bid History Feed ───────────────────────────────────── */}
+      {/* ── Bid History ──────────────────────────────── */}
       {bidHistory.length > 0 && (
-        <section className="border-4 border-black bg-white p-6 shadow-[8px_8px_0px_0px_#000]">
-          <h2 className="mb-3 text-xs font-bold uppercase tracking-widest text-gray-500">
-            Recent Bids
+        <section className="brutal-static p-6">
+          <h2 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+            // BID LOG
           </h2>
-          <ul className="divide-y-2 divide-black">
+          <ul className="divide-y-2 divide-[#1e1e2e]">
             {[...bidHistory].reverse().map((evt, i) => (
               <li
                 key={`${evt.bidder}-${evt.timestamp}-${i}`}
-                className="flex items-center justify-between py-2 font-mono text-sm"
+                className="flex items-center justify-between py-2.5 font-mono text-xs"
               >
-                <span className="font-bold">
-                  {evt.bidder.slice(0, 4)}…{evt.bidder.slice(-4)}
+                <span className="text-[#6b6b80]">
+                  {evt.bidder.slice(0, 4)}...{evt.bidder.slice(-4)}
                 </span>
-                <span className="font-black">{formatAmount(BigInt(evt.amount))}</span>
+                <span className="font-bold text-[#e8e8f0]">
+                  {formatAmount(BigInt(evt.amount))}
+                </span>
               </li>
             ))}
           </ul>
