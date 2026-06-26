@@ -3,11 +3,12 @@
 import Link from "next/link";
 import { useState } from "react";
 import { useWalletStore } from "@/store/walletStore";
+import WalletModal from "./WalletModal";
 
 export default function Navbar() {
-  const { address, isConnecting, error, connect, disconnect } =
-    useWalletStore();
+  const { address, isConnecting, error, disconnect } = useWalletStore();
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [isModalOpen, setIsModalOpen] = useState(false);
 
   const truncate = (addr: string) =>
     `${addr.slice(0, 4)}...${addr.slice(-4)}`;
@@ -68,7 +69,7 @@ export default function Navbar() {
             </div>
           ) : (
             <button
-              onClick={connect}
+              onClick={() => setIsModalOpen(true)}
               disabled={isConnecting}
               className="border-2 border-[#3b82f6] bg-[#3b82f6] px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-[3px_3px_0px_0px_#1e40af] transition hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[4px_4px_0px_0px_#1e40af] disabled:opacity-60"
             >
@@ -123,6 +124,12 @@ export default function Navbar() {
           )}
         </div>
       )}
+
+      {/* Mount the Multi-Wallet Modal */}
+      <WalletModal 
+        isOpen={isModalOpen} 
+        onClose={() => setIsModalOpen(false)} 
+      />
     </header>
   );
 }

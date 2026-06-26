@@ -1,108 +1,82 @@
 "use client";
 
 import Link from "next/link";
-import type { AuctionDetails } from "@/store/auctionStore";
-import { formatAmount, formatDuration } from "@/lib/format";
+import { type AuctionDetails } from "@/store/auctionStore";
+import { useEffect, useState } from "react";
 
-interface AuctionCardProps {
+interface Props {
   auction: AuctionDetails;
 }
 
-function getTimeLeft(endTime: number): string {
-  const now = Math.floor(Date.now() / 1000);
-  const remaining = Math.max(0, endTime - now);
-  if (remaining <= 0) return "ENDED";
-  return formatDuration(remaining);
-}
+export default function AuctionCard({ auction }: Props) {
+  const [timeLeft, setTimeLeft] = useState("");
+  const isEnded = Math.floor(Date.now() / 1000) >= auction.endTime;
+  const hasBids = auction.highestBid > 0n;
 
-function getStatus(auction: AuctionDetails): {
-  label: string;
-  cls: string;
-} {
-  if (auction.claimed)
-    return { label: "SETTLED", cls: "border-[#6b6b80] bg-[#6b6b80]/10 text-[#6b6b80]" };
-  if (auction.ended)
-    return { label: "ENDED", cls: "border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]" };
-  const now = Math.floor(Date.now() / 1000);
-  if (now < auction.startTime)
-    return { label: "PENDING", cls: "border-[#eab308] bg-[#eab308]/10 text-[#eab308]" };
-  return { label: "LIVE", cls: "border-[#22c55e] bg-[#22c55e]/10 text-[#22c55e]" };
-}
+  // Format the 7-decimal integer to a readable string
+  const formatToken = (amount: bigint) => (Number(amount) / 10000000).toFixed(2);
+  const truncate = (str: string) => `${str.slice(0, 4)}...${str.slice(-4)}`;
 
-export default function AuctionCard({ auction }: AuctionCardProps) {
-  const status = getStatus(auction);
-  const isLive =
-    !auction.ended &&
-    !auction.claimed &&
-    Math.floor(Date.now() / 1000) >= auction.startTime;
+  useEffect(() => {
+    const interval = setInterval(() => {
+      const diff = auction.endTime - Math.floor(Date.now() / 1000);
+      if (diff <= 0) {
+        setTimeLeft("ENDED");
+      } else {
+        const h = Math.floor(diff / 3600);
+        const m = Math.floor((diff % 3600) / 60);
+        const s = diff % 60;
+        setTimeLeft(`${h}h ${m}m ${s}s`);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
+  }, [auction.endTime]);
 
   return (
     <Link
       href={`/auction/${auction.id.toString()}`}
-      className="group brutal block p-5"
+      className="group relative flex flex-col border-2 border-[#1e1e2e] bg-[#0a0a0f] p-5 shadow-[4px_4px_0px_0px_#050508] transition hover:-translate-x-1 hover:-translate-y-1 hover:border-[#3b82f6] hover:shadow-[6px_6px_0px_0px_#1e40af]"
     >
       {/* Header */}
-      <div className="mb-4 flex items-start justify-between">
-        <span className="font-mono text-[10px] text-[#44445a]">
-          #{auction.id.toString()}
+      <div className="mb-4 flex items-center justify-between border-b-2 border-dashed border-[#1e1e2e] pb-3">
+        <span className="font-mono text-xs font-bold text-[#e8e8f0]">
+          ID #{auction.id.toString()}
         </span>
-        <span
-          className={`border px-2 py-0.5 text-[10px] font-bold uppercase ${status.cls}`}
+        <div
+          className={`border-2 px-2 py-0.5 text-[10px] font-bold uppercase tracking-widest ${
+            isEnded
+              ? "border-[#ef4444] text-[#ef4444]"
+              : "border-[#22c55e] text-[#22c55e]"
+          }`}
         >
-          {status.label === "LIVE" && (
-            <span className="mr-1 inline-block h-1.5 w-1.5 bg-[#22c55e] animate-pulse" />
-          )}
-          {status.label}
+          {isEnded ? "CLOSED" : "LIVE"}
+        </div>
+      </div>
+
+      {/* Main Stats */}
+      <div className="mb-6 flex flex-col gap-2">
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[#6b6b80]">
+            CURRENT BID
+          </p>
+          <p className="text-2xl font-black text-[#3b82f6]">
+            {formatToken(hasBids ? auction.highestBid : auction.startPrice)}
+          </p>
+        </div>
+        <div className="flex justify-between text-[10px] uppercase text-[#44445a]">
+          <span>Asset: {truncate(auction.token)}</span>
+          <span>Bids: {hasBids ? "YES" : "NO"}</span>
+        </div>
+      </div>
+
+      {/* Footer / Timer */}
+      <div className="mt-auto flex items-center justify-between bg-[#0e0e16] px-3 py-2">
+        <span className="font-mono text-xs font-bold text-[#e8e8f0]">
+          {isEnded ? "[ SETTLEMENT READY ]" : timeLeft}
         </span>
-      </div>
-
-      {/* Price */}
-      <p className="mb-1 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
-        {auction.highestBid > 0n ? "CURRENT BID" : "START PRICE"}
-      </p>
-      <p className="mb-3 text-2xl font-bold tracking-tight text-[#e8e8f0]">
-        {formatAmount(
-          auction.highestBid > 0n ? auction.highestBid : auction.startPrice,
-        )}
-      </p>
-
-      {/* Bidder */}
-      {auction.highestBidder && auction.highestBid > 0n && (
-        <p className="mb-3 text-[10px] text-[#44445a]">
-          BIDDER:{" "}
-          <span className="text-[#6b6b80]">
-            {auction.highestBidder.slice(0, 4)}...{auction.highestBidder.slice(-4)}
-          </span>
-        </p>
-      )}
-
-      {/* Footer */}
-      <div className="border-t-2 border-[#1e1e2e] pt-3">
-        {isLive ? (
-          <div className="flex items-center gap-2">
-            <span className="live-dot" />
-            <p className="font-mono text-xs font-bold text-[#e8e8f0]">
-              {getTimeLeft(auction.endTime)}
-            </p>
-          </div>
-        ) : auction.claimed ? (
-          <p className="text-xs font-bold uppercase text-[#6b6b80]">
-            AUCTION COMPLETE
-          </p>
-        ) : auction.ended ? (
-          <p className="text-xs font-bold uppercase text-[#ef4444]">
-            AUCTION ENDED
-          </p>
-        ) : (
-          <p className="text-xs font-bold uppercase text-[#eab308]">
-            STARTS IN {getTimeLeft(auction.startTime)}
-          </p>
-        )}
-      </div>
-
-      {/* Hover arrow */}
-      <div className="mt-3 text-right text-xs font-bold uppercase text-[#3b82f6] opacity-0 transition group-hover:opacity-100">
-        VIEW →
+        <span className="text-xs font-bold text-[#3b82f6] opacity-0 transition group-hover:opacity-100">
+          ENTER &rarr;
+        </span>
       </div>
     </Link>
   );

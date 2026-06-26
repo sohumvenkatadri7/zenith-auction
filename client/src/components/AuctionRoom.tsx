@@ -1,250 +1,255 @@
 "use client";
 
 import { useEffect, useState, useCallback } from "react";
+import Link from "next/link";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore } from "@/store/auctionStore";
 import { useAuction } from "@/hooks/useAuction";
-import { formatAmount, formatDuration } from "@/lib/format";
-import BidButton from "./BidButton";
 
-interface AuctionRoomProps {
+interface Props {
   auctionId: bigint;
 }
 
-export default function AuctionRoom({ auctionId }: AuctionRoomProps) {
+export default function AuctionRoom({ auctionId }: Props) {
   const { address } = useWalletStore();
-  const { auction, isLoading, error, bidHistory } = useAuctionStore();
-  const { placeBid, claimWinning, getAuctionDetails, pollBidEvents } =
-    useAuction();
+  const { auction, isLoading, error } = useAuctionStore();
+  const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold } = useAuction();
 
-  const [timeLeft, setTimeLeft] = useState<number | null>(null);
+  const [bidAmount, setBidAmount] = useState("");
+  const [txStatus, setTxStatus] = useState<"idle" | "submitting" | "error">("idle");
+  const [txMessage, setTxMessage] = useState("");
+  const [timeLeft, setTimeLeft] = useState<string>("");
+
+  // ── Data Sync ──────────────────────────────────────────
+  const refreshAuction = useCallback(async () => {
+    await getAuctionDetails(auctionId);
+  }, [auctionId, getAuctionDetails]);
 
   useEffect(() => {
-    getAuctionDetails(auctionId);
-  }, [getAuctionDetails, auctionId]);
+    refreshAuction();
+  }, [refreshAuction]);
 
+  // ── Timer ──────────────────────────────────────────────
   useEffect(() => {
     if (!auction) return;
-    const tick = () => {
+    const interval = setInterval(() => {
       const now = Math.floor(Date.now() / 1000);
-      setTimeLeft(Math.max(0, auction.endTime - now));
-    };
-    tick();
-    const id = setInterval(tick, 1000);
-    return () => clearInterval(id);
+      const diff = auction.endTime - now;
+      if (diff <= 0) {
+        setTimeLeft("AUCTION ENDED");
+        clearInterval(interval);
+      } else {
+        const h = Math.floor(diff / 3600);
+        const m = Math.floor((diff % 3600) / 60);
+        const s = diff % 60;
+        setTimeLeft(`${h}h ${m}m ${s}s`);
+      }
+    }, 1000);
+    return () => clearInterval(interval);
   }, [auction]);
 
-  useEffect(() => {
-    if (!address) return;
-    pollBidEvents(String(auctionId));
-    const interval = setInterval(() => pollBidEvents(String(auctionId)), 5000);
-    return () => clearInterval(interval);
-  }, [address, pollBidEvents, auctionId]);
+  // ── Helpers ──────────────────────────────────────────
+  const formatToken = (amount: bigint) => (Number(amount) / 10000000).toFixed(2);
 
-  useEffect(() => {
-    if (bidHistory.length > 0) getAuctionDetails(auctionId);
-  }, [bidHistory.length, getAuctionDetails, auctionId]);
+  // ── Handlers ──────────────────────────────────────────
+  const handleBid = async (e: React.FormEvent) => {
+    e.preventDefault();
+    setTxMessage(""); // Clear previous errors
+    
+    if (!address) return setTxMessage("CONNECT WALLET FIRST");
+    
+    // 1. Pre-flight check (UI validation)
+    const bidValue = Number(bidAmount);
+    const hasBids = auction!.highestBid > 0n;
+    const currentHigh = Number(formatToken(hasBids ? auction!.highestBid : auction!.startPrice));
+    
+    if (isNaN(bidValue) || bidValue <= currentHigh) {
+      setTxMessage(`BID MUST BE HIGHER THAN ${currentHigh}`);
+      return; 
+    }
 
-  const handleBid = useCallback(
-    async (amount: string) => {
-      const decimals = 7;
-      const parsed = BigInt(Math.round(Number(amount) * 10 ** decimals));
-      await placeBid(auctionId, parsed);
-      await getAuctionDetails(auctionId);
-    },
-    [placeBid, getAuctionDetails, auctionId],
-  );
+    const priceDecimals = 7;
+    const bidBigInt = BigInt(Math.round(bidValue * 10 ** priceDecimals));
 
-  const handleClaim = useCallback(async () => {
-    await claimWinning(auctionId);
-    await getAuctionDetails(auctionId);
-  }, [claimWinning, getAuctionDetails, auctionId]);
+    setTxStatus("submitting");
 
-  // ── Loading ───────────────────────────────────────────
+    try {
+      await placeBid(auctionId, bidBigInt);
+      // Wait for ledger propagation
+      await new Promise((resolve) => setTimeout(resolve, 2000));
+      await refreshAuction();
+      setTxStatus("idle");
+      setBidAmount("");
+    } catch (err: any) {
+      setTxStatus("idle");
+      if (err.message.includes("BidTooLow")) {
+        setTxMessage("YOUR BID IS TOO LOW. PLEASE BID HIGHER.");
+      } else {
+        setTxMessage("TRANSACTION FAILED: " + err.message);
+      }
+    }
+  };
+
+  const handleClaim = async () => {
+    setTxStatus("submitting");
+    try {
+      await claimWinning(auctionId);
+      await refreshAuction();
+      setTxStatus("idle");
+    } catch (err: any) {
+      setTxMessage(err.message.toUpperCase());
+    }
+  };
+
+  const handleReclaim = async () => {
+    setTxStatus("submitting");
+    try {
+      await reclaimUnsold(auctionId);
+      await refreshAuction();
+      setTxStatus("idle");
+    } catch (err: any) {
+      setTxMessage(err.message.toUpperCase());
+    }
+  };
+
+  // ── Render States ────────────────────────────────────
   if (isLoading && !auction) {
     return (
-      <div className="flex flex-1 items-center justify-center p-12">
-        <div className="flex items-center gap-3">
-          <span className="inline-block h-4 w-4 animate-spin border-2 border-[#44445a] border-t-[#3b82f6]" />
-          <span className="text-xs font-bold uppercase text-[#6b6b80]">
-            LOADING AUCTION...
-          </span>
-        </div>
-      </div>
+      <main className="flex flex-1 items-center justify-center p-10">
+        <span className="font-mono text-xs font-bold uppercase tracking-widest text-[#6b6b80]">
+          SYNCING WITH LEDGER...
+        </span>
+      </main>
     );
   }
 
-  // ── Error ─────────────────────────────────────────────
-  if (error && !auction) {
+  if (error || !auction) {
     return (
-      <div className="flex flex-1 items-center justify-center p-12">
-        <div className="brutal-static max-w-md p-8 text-center">
-          <p className="mb-1 text-[10px] font-bold uppercase text-[#ef4444]">
-            [ERR]
+      <main className="flex flex-1 flex-col items-center justify-center gap-4 p-10">
+        <div className="border-2 border-[#ef4444] bg-[#ef4444]/10 p-6 text-center">
+          <p className="font-mono text-xs font-bold uppercase text-[#ef4444]">
+            [ERR] {error || "AUCTION NOT FOUND"}
           </p>
-          <p className="mb-4 text-sm font-bold text-[#e8e8f0]">{error}</p>
-          <button
-            onClick={() => getAuctionDetails(auctionId)}
-            className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2 text-[10px] font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#3b82f6] hover:text-[#3b82f6]"
-          >
-            RETRY
-          </button>
         </div>
-      </div>
+        <Link href="/" className="text-[10px] font-bold uppercase tracking-wider text-[#3b82f6] hover:underline">
+          &lt; RETURN TO EXPLORE
+        </Link>
+      </main>
     );
   }
 
-  if (!auction) {
-    return (
-      <div className="flex flex-1 items-center justify-center p-12">
-        <p className="font-mono text-xs text-[#44445a]">
-          AUCTION_NOT_FOUND
-        </p>
-      </div>
-    );
-  }
-
-  const now = Math.floor(Date.now() / 1000);
-  const isStarted = now >= auction.startTime;
-  const isEnded =
-    auction.ended || (timeLeft !== null && timeLeft <= 0) || now > auction.endTime;
-  const isWinner =
-    address && auction.highestBidder ? address === auction.highestBidder : false;
-
-  const statusCls = auction.claimed
-    ? "border-[#6b6b80] bg-[#6b6b80]/10 text-[#6b6b80]"
-    : isEnded
-      ? "border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]"
-      : isStarted
-        ? "border-[#22c55e] bg-[#22c55e]/10 text-[#22c55e]"
-        : "border-[#eab308] bg-[#eab308]/10 text-[#eab308]";
-
-  const statusLabel = auction.claimed
-    ? "SETTLED"
-    : isEnded
-      ? "ENDED"
-      : isStarted
-        ? "LIVE"
-        : "PENDING";
+  const isEnded = Math.floor(Date.now() / 1000) >= auction.endTime;
+  const isCreator = address === auction.creator;
+  const isWinner = address === auction.highestBidder;
+  const hasBids = auction.highestBid > 0n;
 
   return (
-    <main className="mx-auto flex w-full max-w-3xl flex-1 flex-col gap-5 px-6 py-10">
-      {/* ── Header ───────────────────────────────────── */}
-      <div className="flex items-center justify-between">
-        <h1 className="font-mono text-xs text-[#44445a]">
-          AUCTION #{auctionId.toString()}
-        </h1>
-        <span
-          className={`flex items-center gap-1.5 border px-2.5 py-0.5 text-[10px] font-bold uppercase ${statusCls}`}
-        >
-          {statusLabel === "LIVE" && (
-            <span className="live-dot" />
-          )}
-          {statusLabel}
-        </span>
+    <main className="mx-auto flex w-full max-w-4xl flex-1 flex-col gap-8 px-6 py-10">
+      
+      {/* Header */}
+      <div className="flex items-end justify-between border-b-2 border-[#1e1e2e] pb-4">
+        <div>
+          <Link href="/" className="mb-4 inline-block text-[10px] font-bold uppercase tracking-wider text-[#6b6b80] hover:text-[#e8e8f0] transition">
+            &lt; BACK
+          </Link>
+          <h1 className="text-4xl font-black uppercase tracking-tighter text-[#e8e8f0]">
+            AUCTION #{auction.id.toString()}
+          </h1>
+        </div>
+        <div className={`border-2 px-3 py-1 text-xs font-bold uppercase tracking-widest ${isEnded ? 'border-[#ef4444] text-[#ef4444]' : 'border-[#22c55e] text-[#22c55e]'}`}>
+          {isEnded ? "CLOSED" : "LIVE"}
+        </div>
       </div>
 
-      {/* ── Countdown ─────────────────────────────────── */}
-      <section className="brutal-static p-6">
-        <h2 className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
-          // {isStarted ? "TIME REMAINING" : "STARTS IN"}
-        </h2>
-        <p
-          className={`font-mono text-5xl font-bold tracking-tight ${
-            isEnded ? "text-[#ef4444]" : "text-[#e8e8f0]"
-          }`}
-        >
-          {timeLeft !== null ? formatDuration(timeLeft) : "--:--:--"}
-        </p>
-      </section>
+      <div className="grid gap-6 md:grid-cols-2">
+        
+        {/* Column 1: Data */}
+        <div className="flex flex-col gap-6">
+          <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-6">
+            <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-[#44445a]">
+              // TERMINAL DATA
+            </h2>
+            
+            <div className="flex flex-col gap-4 font-mono text-sm">
+              <div>
+                <span className="text-[#6b6b80]">CREATOR:</span>
+                <p className="truncate text-[#e8e8f0]">{auction.creator}</p>
+              </div>
+              <div className="border-t-2 border-dashed border-[#1e1e2e] pt-4">
+                <span className="text-[#6b6b80]">CURRENT HIGHEST BID:</span>
+                <p className="text-3xl font-bold text-[#3b82f6]">
+                  {formatToken(hasBids ? auction.highestBid : auction.startPrice)}
+                </p>
+                <p className="text-[10px] text-[#44445a] uppercase">
+                  Holder: {hasBids ? auction.highestBidder : "NONE"}
+                </p>
+              </div>
+            </div>
+            
+            <button 
+              onClick={refreshAuction}
+              className="mt-6 w-full border-2 border-[#1e1e2e] bg-[#0a0a0f] py-2 text-[10px] font-bold uppercase tracking-widest text-[#6b6b80] transition hover:border-[#3b82f6] hover:text-[#3b82f6]"
+            >
+              [ REFRESH LEDGER STATE ]
+            </button>
+          </div>
+        </div>
 
-      {/* ── Highest Bid ──────────────────────────────── */}
-      <section className="brutal-static p-6">
-        <h2 className="mb-2 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
-          // HIGHEST BID
-        </h2>
-        <p className="text-4xl font-bold tracking-tight text-[#e8e8f0]">
-          {auction.highestBid > 0n
-            ? formatAmount(auction.highestBid)
-            : formatAmount(auction.startPrice)}
-        </p>
-        {auction.highestBidder && auction.highestBid > 0n ? (
-          <p className="mt-2 text-xs text-[#44445a]">
-            BIDDER:{" "}
-            <span className="font-bold text-[#6b6b80]">
-              {auction.highestBidder.slice(0, 4)}...
-              {auction.highestBidder.slice(-4)}
-            </span>
-          </p>
-        ) : (
-          <p className="mt-2 text-xs font-bold text-[#3b82f6]">
-            NO BIDS YET
-          </p>
-        )}
-      </section>
+        {/* Column 2: Interaction */}
+        <div className="flex flex-col gap-6">
+          <div className="border-2 border-[#1e1e2e] bg-[#0a0a0f] p-6 shadow-[8px_8px_0px_0px_#050508]">
+            <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-[#44445a]">
+              // {isEnded ? "SETTLEMENT" : "TIME REMAINING"}
+            </h2>
+            
+            <div className="mb-6 text-4xl font-black tracking-widest text-[#e8e8f0]">
+              {timeLeft}
+            </div>
 
-      {/* ── Bid / Claim ──────────────────────────────── */}
-      <section className="brutal-static p-6">
-        {!address ? (
-          <p className="text-center text-xs font-bold uppercase text-[#44445a]">
-            CONNECT WALLET TO BID
-          </p>
-        ) : !isStarted ? (
-          <p className="text-center text-xs font-bold uppercase text-[#44445a]">
-            AUCTION HAS NOT STARTED
-          </p>
-        ) : isEnded && !auction.ended && auction.highestBid > 0n && isWinner ? (
-          <button
-            onClick={handleClaim}
-            disabled={isLoading}
-            className="w-full border-2 border-[#22c55e] bg-[#22c55e] px-6 py-3.5 text-sm font-bold uppercase tracking-wider text-black shadow-[4px_4px_0px_0px_#15803d] transition hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#15803d] disabled:opacity-60"
-          >
-            {isLoading ? "SETTLING..." : "[ CLAIM WINNING ]"}
-          </button>
-        ) : isEnded ? (
-          <p className="text-center text-xs font-bold uppercase text-[#6b6b80]">
-            {isWinner
-              ? "AUCTION ENDED. CLAIM ABOVE."
-              : auction.highestBidder && auction.highestBid > 0n
-                ? `WINNER: ${auction.highestBidder.slice(0, 4)}...${auction.highestBidder.slice(-4)}`
-                : "AUCTION ENDED. NO BIDS."}
-          </p>
-        ) : (
-          <BidButton
-            onBid={handleBid}
-            disabled={isLoading}
-            minAmount={formatAmount(
-              auction.highestBid > 0n
-                ? auction.highestBid + 1n
-                : auction.startPrice,
+            {!isEnded ? (
+              <form onSubmit={handleBid} className="flex flex-col gap-4">
+                <input
+                  type="text"
+                  placeholder="BID AMOUNT..."
+                  value={bidAmount}
+                  onChange={(e) => setBidAmount(e.target.value)}
+                  className="w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3 font-mono text-sm text-[#e8e8f0] outline-none focus:border-[#3b82f6]"
+                />
+                <button
+                  type="submit"
+                  disabled={txStatus === "submitting"}
+                  className="border-2 border-[#3b82f6] bg-[#3b82f6] py-3 text-sm font-bold uppercase tracking-wider text-white transition hover:-translate-x-1 hover:-translate-y-1 hover:shadow-[4px_4px_0px_0px_#1e40af] disabled:opacity-50"
+                >
+                  {txStatus === "submitting" ? "SIGNING..." : "[ PLACE BID ]"}
+                </button>
+              </form>
+            ) : (
+               <div className="flex flex-col gap-4">
+                {isWinner && hasBids && !auction.claimed ? (
+                  <button onClick={handleClaim} className="border-2 border-[#22c55e] py-3 font-bold uppercase text-[#22c55e]">CLAIM</button>
+                ) : isCreator && !hasBids && !auction.claimed ? (
+                  <button onClick={handleReclaim} className="border-2 border-[#eab308] py-3 font-bold uppercase text-[#eab308]">RECLAIM</button>
+                ) : (
+                  <div className="border-2 border-[#1e1e2e] p-3 text-center text-[10px] text-[#6b6b80]">SETTLED / INACTIVE</div>
+                )}
+               </div>
             )}
-          />
-        )}
-      </section>
 
-      {/* ── Bid History ──────────────────────────────── */}
-      {bidHistory.length > 0 && (
-        <section className="brutal-static p-6">
-          <h2 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
-            // BID LOG
-          </h2>
-          <ul className="divide-y-2 divide-[#1e1e2e]">
-            {[...bidHistory].reverse().map((evt, i) => (
-              <li
-                key={`${evt.bidder}-${evt.timestamp}-${i}`}
-                className="flex items-center justify-between py-2.5 font-mono text-xs"
-              >
-                <span className="text-[#6b6b80]">
-                  {evt.bidder.slice(0, 4)}...{evt.bidder.slice(-4)}
-                </span>
-                <span className="font-bold text-[#e8e8f0]">
-                  {formatAmount(BigInt(evt.amount))}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </section>
-      )}
+            {/* Friendly Notification "Pop-up" */}
+            {txMessage && (
+              <div className="mt-6 animate-pulse border-2 border-[#ef4444] bg-[#ef4444]/10 p-4">
+                <p className="font-mono text-[10px] font-bold uppercase tracking-widest text-[#ef4444]">
+                  ⚠️ ATTENTION REQUIRED
+                </p>
+                <p className="mt-1 text-sm font-bold text-[#e8e8f0]">
+                  {txMessage}
+                </p>
+              </div>
+            )}
+          </div>
+        </div>
+
+      </div>
     </main>
   );
 }

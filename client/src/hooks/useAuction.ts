@@ -18,6 +18,7 @@ import {
   scValToNative,
   Address,
   xdr,
+  Account,
 } from "@stellar/stellar-sdk";
 
 const { Server, assembleTransaction } = rpc;
@@ -244,8 +245,10 @@ export function useAuction() {
       }
 
       try {
-        const source = await server.getAccount(
-          "GBZC6Y2Y7Q3ZQ2Y4QZJ2XZ3Z5YXZ6Z7Z2Y4QZJ2XZ3Z5YXZ6Z7Z2Y4",
+        // FIX: Construct a local dummy account to bypass the Horizon 404 error entirely
+        const source = new Account(
+          "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", 
+          "0"
         );
 
         const tx = new TransactionBuilder(source, {
