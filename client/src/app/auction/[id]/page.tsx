@@ -20,8 +20,9 @@ export default async function AuctionPage({
   } catch {
     return (
       <main className="flex flex-1 items-center justify-center p-12">
-        <div className="border-4 border-red-600 bg-red-50 p-6 text-center shadow-[6px_6px_0px_0px_#dc2626]">
-          <p className="text-lg font-bold text-red-900">Invalid auction ID</p>
+        <div className="border-2 border-[#ef4444] bg-[#ef4444]/10 p-6 text-center shadow-[6px_6px_0px_0px_#7f1d1d]">
+          <p className="mb-2 font-mono text-lg font-bold text-[#ef4444]">!!</p>
+          <p className="text-sm font-bold uppercase tracking-wider text-[#ef4444]">INVALID AUCTION ID</p>
         </div>
       </main>
     );

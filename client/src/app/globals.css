@@ -27,7 +27,10 @@
 
 /* ── Global Reset ─────────────────────────────────────────────── */
 *, *::before, *::after { box-sizing: border-box; }
-html { scroll-behavior: smooth; }
+html {
+  scroll-behavior: smooth;
+  color-scheme: dark;
+}
 
 body {
   margin: 0;
@@ -54,6 +57,36 @@ input:focus, textarea:focus, select:focus {
   border-color: var(--accent) !important;
   outline: none !important;
   box-shadow: 4px 4px 0px 0px var(--accent) !important;
+}
+
+/* ── Native select option dark mode ───────────────────────── */
+option {
+  background: var(--bg-card);
+  color: var(--text);
+}
+
+/* ── Datetime-local picker dark mode ───────────────────────── */
+::-webkit-calendar-picker-indicator {
+  filter: invert(1) brightness(0.7);
+}
+
+/* ── File input dark mode ──────────────────────────────────── */
+input[type="file"]::file-selector-button {
+  background: var(--accent);
+  color: #fff;
+  border: 2px solid var(--accent);
+  padding: 6px 12px;
+  font-family: var(--font-mono);
+  font-size: 10px;
+  font-weight: bold;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+input[type="file"]::file-selector-button:hover {
+  background: var(--accent-bright);
 }
 
 /* ── Brutalist Card ───────────────────────────────────────────── */
@@ -134,6 +167,11 @@ input:focus, textarea:focus, select:focus {
 .animate-fade-up-4 { animation: fade-up 0.5s ease 0.4s forwards; opacity: 0; }
 
 /* ── Live Indicator ───────────────────────────────────────────── */
+@keyframes blink {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.2; }
+}
+
 .live-dot {
   width: 6px;
   height: 6px;
@@ -146,5 +184,53 @@ input:focus, textarea:focus, select:focus {
 ::-webkit-scrollbar-track { background: var(--bg); }
 ::-webkit-scrollbar-thumb { background: var(--border-hard); }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-muted); }
+
+/* ── Bid Flash ─────────────────────────────────────────────── */
+@keyframes bid-flash {
+  0% { background-color: rgba(59, 130, 246, 0.3); }
+  100% { background-color: transparent; }
+}
+.animate-bid-flash { animation: bid-flash 1.2s ease-out forwards; }
+
+/* ── Number Pop ────────────────────────────────────────────── */
+@keyframes number-pop {
+  0% { transform: scale(1); }
+  30% { transform: scale(1.12); }
+  100% { transform: scale(1); }
+}
+.animate-number-pop { animation: number-pop 0.4s ease-out; }
+
+/* ── Pulse Ring ────────────────────────────────────────────── */
+@keyframes pulse-ring {
+  0% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0.5); }
+  70% { box-shadow: 0 0 0 8px rgba(34, 197, 94, 0); }
+  100% { box-shadow: 0 0 0 0 rgba(34, 197, 94, 0); }
+}
+.animate-pulse-ring { animation: pulse-ring 2s ease infinite; }
+
+/* ── Slide In From Right ───────────────────────────────────── */
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(24px); }
+  to { opacity: 1; transform: translateX(0); }
+}
+.animate-slide-in-right { animation: slide-in-right 0.3s ease forwards; }
+
+/* ── Progress Bar Shimmer ──────────────────────────────────── */
+@keyframes shimmer {
+  0% { background-position: -200% 0; }
+  100% { background-position: 200% 0; }
+}
+.animate-shimmer {
+  background: linear-gradient(90deg, var(--accent) 0%, var(--accent-bright) 50%, var(--accent) 100%);
+  background-size: 200% 100%;
+  animation: shimmer 2s linear infinite;
+}
+
+/* ── Urgency Glow ──────────────────────────────────────────── */
+@keyframes urgency-glow {
+  0%, 100% { text-shadow: 0 0 4px rgba(239, 68, 68, 0.4); }
+  50% { text-shadow: 0 0 16px rgba(239, 68, 68, 0.8); }
+}
+.animate-urgency { animation: urgency-glow 1s ease-in-out infinite; }
 
 

@@ -10,8 +10,10 @@ export default function Navbar() {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
 
-  const truncate = (addr: string) =>
-    `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+  const truncate = (addr: string | null) => {
+    if (!addr) return "";
+    return `${addr.slice(0, 4)}...${addr.slice(-4)}`;
+  };
 
   return (
     <header className="sticky top-0 z-50 border-b-2 border-[#1e1e2e] bg-[#0a0a0f]">
@@ -35,12 +37,26 @@ export default function Navbar() {
             EXPLORE
           </Link>
           {address && (
-            <Link
-              href="/create"
-              className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
-            >
-              + CREATE
-            </Link>
+            <>
+              <Link
+                href="/create"
+                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+              >
+                + CREATE
+              </Link>
+              <Link
+                href="/nfts"
+                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+              >
+                MY NFTS
+              </Link>
+              <Link
+                href="/mint"
+                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+              >
+                MINT NFT
+              </Link>
+            </>
           )}
         </nav>
 
@@ -108,13 +124,29 @@ export default function Navbar() {
               EXPLORE
             </Link>
             {address && (
-              <Link
-                href="/create"
-                onClick={() => setMobileOpen(false)}
-                className="border-2 border-[#3b82f6] bg-[#3b82f6] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white"
-              >
-                + NEW AUCTION
-              </Link>
+              <>
+                <Link
+                  href="/create"
+                  onClick={() => setMobileOpen(false)}
+                  className="border-2 border-[#3b82f6] bg-[#3b82f6] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-white"
+                >
+                  + NEW AUCTION
+                </Link>
+                <Link
+                  href="/nfts"
+                  onClick={() => setMobileOpen(false)}
+                  className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80]"
+                >
+                  MY NFTS
+                </Link>
+                <Link
+                  href="/mint"
+                  onClick={() => setMobileOpen(false)}
+                  className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80]"
+                >
+                  MINT NFT
+                </Link>
+              </>
             )}
           </nav>
           {error && (

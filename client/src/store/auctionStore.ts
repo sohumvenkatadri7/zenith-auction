@@ -6,6 +6,7 @@ export interface AuctionDetails {
   id: bigint;
   creator: string;
   token: string;
+  token_id: bigint;
   bidToken: string;
   startPrice: bigint;
   highestBid: bigint;
@@ -14,6 +15,8 @@ export interface AuctionDetails {
   endTime: number;
   ended: boolean;
   claimed: boolean;
+  isPrivate: boolean;
+  allowlist: string[];
 }
 
 export interface BidEvent {

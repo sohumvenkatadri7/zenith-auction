@@ -1,34 +1,92 @@
 "use client";
 
-import { useState, useCallback, useEffect } from "react";
-import { useRouter } from "next/navigation";
+import { useState, useCallback, useEffect, Suspense } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore } from "@/store/auctionStore";
 import { useAuction } from "@/hooks/useAuction";
+import { NFT_CONTRACT_ADDRESS } from "@/lib/constants";
 
-export default function CreateAuctionPage() {
+const SUPPORTED_BID_TOKENS = [
+  {
+    symbol: "XLM",
+    name: "Native Stellar Lumens",
+    address: "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQVU2HHGCYSC"
+  },
+  {
+    symbol: "USDC",
+    name: "USD Coin (Testnet Dummy)",
+    address: "CCW67TSZV3FE2V2W4E4B6GBYYV5Y2Z6P43JFVJ2ZXVX4P4O73L5JQQG2" 
+  },
+  {
+    symbol: "CUSTOM",
+    name: "Custom Contract ID",
+    address: "custom"
+  }
+];
+
+// ── Helper: Translates ugly blockchain logs into human UI ──
+const parseErrorMessage = (rawError: string): string => {
+  const err = rawError.toUpperCase();
+  
+  if (err.includes("CANCELLED")) 
+    return "TRANSACTION CANCELLED BY USER.";
+  if (err.includes("NOT A CONTRACT ADDRESS")) 
+    return "INVALID ASSET: YOU PROVIDED A USER WALLET (G...) INSTEAD OF A TOKEN CONTRACT (C...).";
+  if (err.includes("INSUFFICIENT BALANCE") || err.includes("BALANCE_TOO_LOW")) 
+    return "INSUFFICIENT BALANCE: YOU DON'T OWN ENOUGH OF THIS TOKEN TO AUCTION IT.";
+  if (err.includes("INVALIDINPUT")) 
+    return "CONTRACT REJECTED INPUT: DOUBLE CHECK YOUR DATES AND TOKEN ADDRESSES.";
+  if (err.includes("TIMEOUT") || err.includes("NETWORK")) 
+    return "NETWORK TIMEOUT: THE STELLAR NETWORK TOOK TOO LONG TO RESPOND.";
+    
+  // Fallback for unknown errors
+  return "TRANSACTION FAILED: CHECK CONSOLE FOR DETAILS.";
+};
+
+const PINATA_GATEWAY = "https://gateway.pinata.cloud/ipfs";
+
+function CreateAuctionInner() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { address } = useWalletStore();
   const { auctions } = useAuctionStore();
   const { createAuction, addKnownAuctionId, fetchAllAuctions } = useAuction();
 
+  // Read NFT params from URL
+  const urlTokenId = searchParams.get("tokenId");
+  const urlHash = searchParams.get("hash") ?? "";
+  const nftPreview = urlTokenId && urlHash ? {
+    tokenId: urlTokenId,
+    imageUrl: `${PINATA_GATEWAY}/${urlHash}`,
+  } : null;
+
   const [tokenAddress, setTokenAddress] = useState("");
-  const [bidTokenAddress, setBidTokenAddress] = useState("");
+  const [tokenIdInput, setTokenIdInput] = useState(urlTokenId ?? "");
+  const [selectedBidToken, setSelectedBidToken] = useState(SUPPORTED_BID_TOKENS[0].address);
+  const [customBidToken, setCustomBidToken] = useState("");
   const [startPrice, setStartPrice] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [imgError, setImgError] = useState(false);
+  const [isPrivate, setIsPrivate] = useState(false);
+  const [allowlistInput, setAllowlistInput] = useState("");
 
-  // Ensure we have the latest auctions loaded from the ledger
+  // Auto-fill token address + tokenId with NFT contract if coming from gallery (once)
   useEffect(() => {
-    if (address) {
-      fetchAllAuctions();
+    if (urlTokenId) {
+      setTokenAddress(NFT_CONTRACT_ADDRESS);
+      setTokenIdInput(urlTokenId);
     }
+  }, [urlTokenId]);
+
+  useEffect(() => {
+    if (address) { fetchAllAuctions(); }
   }, [address, fetchAllAuctions]);
 
-  // Filter global state for ONLY auctions hosted by the connected wallet
   const myHostedAuctions = auctions.filter((a) => a.creator === address);
 
   const handleSubmit = useCallback(
@@ -36,8 +94,10 @@ export default function CreateAuctionPage() {
       e.preventDefault();
 
       const cleanTokenAddress = tokenAddress.trim();
-      const cleanBidTokenAddress = bidTokenAddress.trim();
       const cleanStartPrice = startPrice.trim();
+      const finalBidTokenAddress = selectedBidToken === "custom" 
+        ? customBidToken.trim() 
+        : selectedBidToken;
 
       if (!address) {
         setStatus("error");
@@ -45,10 +105,59 @@ export default function CreateAuctionPage() {
         return;
       }
 
-      if (!cleanTokenAddress || !cleanBidTokenAddress || !cleanStartPrice || !startTime || !endTime) {
+      if (!cleanTokenAddress || !finalBidTokenAddress || !cleanStartPrice || !startTime || !endTime) {
         setStatus("error");
         setMessage("ALL FIELDS REQUIRED");
         return;
+      }
+
+      // Pre-flight: validate tokenId
+      const cleanTokenId = tokenIdInput.trim();
+      if (!cleanTokenId) {
+        setStatus("error");
+        setMessage("TOKEN ID IS REQUIRED. ENTER THE NFT TOKEN ID TO AUCTION.");
+        return;
+      }
+      const tokenIdParsed = Number(cleanTokenId);
+      if (!Number.isFinite(tokenIdParsed) || !Number.isInteger(tokenIdParsed) || tokenIdParsed < 0) {
+        setStatus("error");
+        setMessage("INVALID TOKEN ID: MUST BE A VALID NON-NEGATIVE INTEGER.");
+        return;
+      }
+
+      // Pre-flight check for "G" addresses
+      if (cleanTokenAddress.startsWith("G") || finalBidTokenAddress.startsWith("G")) {
+        setStatus("error");
+        setMessage("INVALID ASSET: TOKENS MUST BE CONTRACTS STARTING WITH 'C', NOT WALLETS STARTING WITH 'G'.");
+        return;
+      }
+
+      // Pre-flight: validate allowlist if private auction
+      let allowlistAddresses: string[] = [];
+      if (isPrivate) {
+        const raw = allowlistInput.trim();
+        if (!raw) {
+          setStatus("error");
+          setMessage("PRIVATE AUCTION REQUIRES AT LEAST ONE ALLOWLIST ADDRESS.");
+          return;
+        }
+        allowlistAddresses = raw
+          .split(",")
+          .map((addr) => addr.trim())
+          .filter((addr) => addr.length > 0);
+
+        if (allowlistAddresses.length === 0) {
+          setStatus("error");
+          setMessage("ALLOWLIST CONTAINS NO VALID ADDRESSES.");
+          return;
+        }
+
+        const invalidAddr = allowlistAddresses.find((addr) => !addr.startsWith("G"));
+        if (invalidAddr) {
+          setStatus("error");
+          setMessage(`INVALID ALLOWLIST ADDRESS: "${invalidAddr}" — STELLAR WALLETS MUST START WITH 'G'.`);
+          return;
+        }
       }
 
       const startTs = Math.floor(new Date(startTime).getTime() / 1000);
@@ -72,20 +181,19 @@ export default function CreateAuctionPage() {
       setMessage("");
 
       try {
-        const knownIds = JSON.parse(
-          localStorage.getItem("zenith_known_auction_ids") || "[]",
-        );
-        const nextId = knownIds.length > 0
-          ? Math.max(...knownIds.map(Number)) + 1
-          : 1;
+        const knownIds = JSON.parse(localStorage.getItem("zenith_known_auction_ids") || "[]");
+        const nextId = knownIds.length > 0 ? Math.max(...knownIds.map(Number)) + 1 : 1;
 
         await createAuction(
           address,
           cleanTokenAddress,
-          cleanBidTokenAddress,
+          BigInt(tokenIdParsed),
+          finalBidTokenAddress, 
           priceBigInt,
           startTs,
           endTs,
+          isPrivate,
+          allowlistAddresses,
         );
 
         addKnownAuctionId(BigInt(nextId));
@@ -98,45 +206,34 @@ export default function CreateAuctionPage() {
         }, 2000);
       } catch (err: unknown) {
         setStatus("error");
-        setMessage(
-          err instanceof Error ? err.message.toUpperCase() : "TRANSACTION FAILED",
-        );
+        
+        // ── USE THE NEW ERROR PARSER HERE ──
+        if (err instanceof Error) {
+          setMessage(parseErrorMessage(err.message));
+          // Log the raw ugly error to the console for your debugging purposes
+          console.error("RAW TX ERROR:", err.message);
+        } else {
+          setMessage("AN UNKNOWN ERROR OCCURRED.");
+        }
       }
     },
-    [
-      address,
-      tokenAddress,
-      bidTokenAddress,
-      startPrice,
-      startTime,
-      endTime,
-      createAuction,
-      addKnownAuctionId,
-      router,
-    ],
+    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, startTime, endTime, isPrivate, allowlistInput, createAuction, addKnownAuctionId, router, nftPreview, urlTokenId]
   );
 
-  const inputClass =
-    "w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-sm text-[#e8e8f0] outline-none transition placeholder:text-[#44445a] disabled:opacity-50 focus:border-[#3b82f6]";
+  const inputClass = "w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-sm text-[#e8e8f0] outline-none transition placeholder:text-[#44445a] disabled:opacity-50 focus:border-[#3b82f6]";
 
-  // ── Not connected ────────────────────────────────────
   if (!address) {
     return (
       <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center gap-6 px-6 py-16">
         <div className="brutal-static border-2 border-[#1e1e2e] bg-[#0e0e16] p-10 text-center">
-          <p className="font-mono text-xs text-[#44445a]">
-            WALLET_NOT_CONNECTED
-          </p>
+          <p className="font-mono text-xs text-[#44445a]">WALLET_NOT_CONNECTED</p>
         </div>
       </main>
     );
   }
 
-  // ── Form + Dashboard Layout ──────────────────────────
   return (
     <main className="mx-auto grid w-full max-w-6xl flex-1 grid-cols-1 gap-10 px-6 py-10 lg:grid-cols-3">
-      
-      {/* Left Column: The Form (Takes up 2/3 of the space) */}
       <div className="flex flex-col gap-8 lg:col-span-2">
         <div>
           <h1 className="text-2xl font-bold uppercase tracking-tight text-[#e8e8f0]">
@@ -147,31 +244,121 @@ export default function CreateAuctionPage() {
           </p>
         </div>
 
+        {/* ── NFT Preview Card (when coming from gallery) ── */}
+        {nftPreview && (
+          <div className="flex items-center gap-3 border-2 border-[#22c55e] bg-[#22c55e]/5 p-3">
+            {!imgError ? (
+              <img
+                src={nftPreview.imageUrl}
+                alt="NFT preview"
+                className="h-16 w-16 flex-shrink-0 rounded-sm border-2 border-[#1e1e2e] object-cover"
+                onError={() => setImgError(true)}
+              />
+            ) : (
+              <div className="flex h-16 w-16 flex-shrink-0 items-center justify-center border-2 border-[#1e1e2e] bg-[#0e0e16]">
+                <span className="text-xl">#</span>
+              </div>
+            )}
+            <div className="flex flex-col gap-1">
+              <span className="text-[10px] font-bold uppercase tracking-widest text-[#22c55e]">
+                NFT SELECTED FROM GALLERY
+              </span>
+              <span className="font-mono text-xs text-[#6b6b80]">
+                TOKEN #{nftPreview.tokenId}
+              </span>
+            </div>
+          </div>
+        )}
+
         <form onSubmit={handleSubmit} className="flex flex-col gap-6">
           <div>
             <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
-              TOKEN_ADDRESS *
+              TOKEN_ADDRESS (Asset to sell) *
             </label>
-            <input
-              type="text"
-              value={tokenAddress}
-              onChange={(e) => setTokenAddress(e.target.value)}
-              placeholder="C..."
-              className={inputClass}
-            />
+            {nftPreview ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={NFT_CONTRACT_ADDRESS}
+                  readOnly
+                  className={`${inputClass} cursor-not-allowed opacity-70`}
+                />
+                <span className="flex-shrink-0 border-2 border-[#22c55e] bg-[#22c55e]/10 px-2 py-3 text-[10px] font-bold uppercase text-[#22c55e]">
+                  LOCKED
+                </span>
+              </div>
+            ) : (
+              <input
+                type="text"
+                value={tokenAddress}
+                onChange={(e) => setTokenAddress(e.target.value)}
+                placeholder="C..."
+                className={inputClass}
+              />
+            )}
           </div>
 
           <div>
             <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
-              BID_TOKEN_ADDRESS *
+              TOKEN_ID (NFT token ID) *
             </label>
-            <input
-              type="text"
-              value={bidTokenAddress}
-              onChange={(e) => setBidTokenAddress(e.target.value)}
-              placeholder="C..."
-              className={inputClass}
-            />
+            {nftPreview ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={tokenIdInput}
+                  readOnly
+                  className={`${inputClass} cursor-not-allowed opacity-70`}
+                />
+                <span className="flex-shrink-0 border-2 border-[#22c55e] bg-[#22c55e]/10 px-2 py-3 text-[10px] font-bold uppercase text-[#22c55e]">
+                  LOCKED
+                </span>
+              </div>
+            ) : (
+              <input
+                type="text"
+                inputMode="numeric"
+                value={tokenIdInput}
+                onChange={(e) => setTokenIdInput(e.target.value)}
+                placeholder="e.g. 42"
+                className={inputClass}
+              />
+            )}
+            <p className="mt-1 text-[10px] text-[#44445a]">
+              THE TOKEN ID OF THE NFT TO AUCTION
+            </p>
+          </div>
+
+          <div>
+            <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+              BID_TOKEN (Accept bids in) *
+            </label>
+            <select
+              value={selectedBidToken}
+              onChange={(e) => {
+                setSelectedBidToken(e.target.value);
+                if (e.target.value !== "custom") setCustomBidToken(""); 
+              }}
+              className={`${inputClass} cursor-pointer appearance-none`}
+            >
+              {SUPPORTED_BID_TOKENS.map((token) => (
+                <option key={token.symbol} value={token.address}>
+                  {token.symbol} — {token.name}
+                </option>
+              ))}
+            </select>
+
+            {selectedBidToken === "custom" && (
+              <div className="mt-3">
+                <input
+                  type="text"
+                  value={customBidToken}
+                  onChange={(e) => setCustomBidToken(e.target.value)}
+                  placeholder="Paste custom C... address"
+                  className={inputClass}
+                />
+              </div>
+            )}
           </div>
 
           <div>
@@ -183,11 +370,11 @@ export default function CreateAuctionPage() {
               inputMode="decimal"
               value={startPrice}
               onChange={(e) => setStartPrice(e.target.value)}
-              placeholder="0.00"
+              placeholder="1.00"
               className={inputClass}
             />
             <p className="mt-1 text-[10px] text-[#44445a]">
-              MINIMUM BID AMOUNT (7 DECIMALS)
+              ENTER AMOUNT IN STANDARD UNITS (E.G. 1.00 = 1 XLM)
             </p>
           </div>
 
@@ -196,57 +383,110 @@ export default function CreateAuctionPage() {
               <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
                 START_TIME *
               </label>
-              <input
-                type="datetime-local"
-                value={startTime}
-                onChange={(e) => setStartTime(e.target.value)}
-                className={inputClass}
-              />
+              <input type="datetime-local" value={startTime} onChange={(e) => setStartTime(e.target.value)} className={inputClass} />
             </div>
             <div>
               <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
                 END_TIME *
               </label>
-              <input
-                type="datetime-local"
-                value={endTime}
-                onChange={(e) => setEndTime(e.target.value)}
-                className={inputClass}
-              />
+              <input type="datetime-local" value={endTime} onChange={(e) => setEndTime(e.target.value)} className={inputClass} />
             </div>
           </div>
 
+          <div className="border-t-2 border-[#1e1e2e] pt-6">
+          {/* ── Private Auction Toggle ── */}
+          <div className="border-2 border-[#1e1e2e] bg-[#0a0a0f] p-4">
+            <div className="flex items-center justify-between">
+              <div>
+                <label className="block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+                  PRIVATE AUCTION
+                </label>
+                <p className="mt-1 text-[10px] text-[#44445a]">
+                  RESTRICT BIDDING TO SPECIFIC WALLETS
+                </p>
+              </div>
+              <button
+                type="button"
+                role="switch"
+                aria-checked={isPrivate}
+                onClick={() => setIsPrivate(!isPrivate)}
+                className={`relative inline-flex h-6 w-11 flex-shrink-0 cursor-pointer border-2 transition-colors duration-200 focus:outline-none focus:ring-2 focus:ring-[#3b82f6] focus:ring-offset-2 focus:ring-offset-[#0a0a0f] ${
+                  isPrivate
+                    ? "border-[#a855f7] bg-[#a855f7]"
+                    : "border-[#1e1e2e] bg-[#1e1e2e]"
+                }`}
+              >
+                <span
+                  className={`pointer-events-none inline-block h-5 w-5 transform bg-[#e8e8f0] shadow-sm transition duration-200 ${
+                    isPrivate ? "translate-x-5" : "translate-x-0"
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* ── Allowlist Textarea (conditionally rendered) ── */}
+            {isPrivate && (
+              <div className="mt-4 border-t border-[#1e1e2e] pt-4">
+                <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#a855f7]">
+                  ALLOWLIST (COMMA-SEPARATED)
+                </label>
+                <textarea
+                  value={allowlistInput}
+                  onChange={(e) => setAllowlistInput(e.target.value)}
+                  placeholder="GABC..., GDEF..., GHIJ..."
+                  rows={3}
+                  className={`${inputClass} resize-none font-mono text-[10px] leading-relaxed placeholder:text-[#44445a] focus:border-[#a855f7]`}
+                />
+                <p className="mt-1 text-[10px] text-[#44445a]">
+                  ONLY THESE WALLETS MAY BID ON THIS AUCTION
+                </p>
+              </div>
+            )}
+          </div>
+          </div>
+
+          {/* ── Beautified Error/Success Alert ── */}
           {message && (
             <div
-              className={`border-2 px-4 py-3 text-[10px] font-bold uppercase tracking-wider ${
+              className={`mt-2 flex items-start gap-3 border-2 p-4 ${
                 status === "success"
-                  ? "border-[#22c55e] bg-[#22c55e]/10 text-[#22c55e]"
+                  ? "border-[#22c55e] bg-[#22c55e]/10"
                   : status === "error"
-                    ? "border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]"
+                    ? "border-[#ef4444] bg-[#ef4444]/10"
                     : ""
               }`}
             >
-              {status === "success" ? "[OK] " : "[ERR] "}
-              {message}
+              <div className="mt-0.5">
+                {status === "success" ? (
+                  <span className="text-[#22c55e]">✔</span>
+                ) : (
+                  <span className="animate-pulse text-[#ef4444]">⚠</span>
+                )}
+              </div>
+              <div>
+                <h4 className={`text-[10px] font-bold uppercase tracking-widest ${status === "success" ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
+                  {status === "success" ? "SUCCESS" : "TRANSACTION REJECTED"}
+                </h4>
+                <p className="mt-1 text-xs font-mono text-[#e8e8f0]">
+                  {message}
+                </p>
+              </div>
             </div>
           )}
 
           <button
             type="submit"
             disabled={status === "submitting"}
-            className="border-2 border-[#3b82f6] bg-[#3b82f6] px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[4px_4px_0px_0px_#1e40af] transition hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#1e40af] disabled:cursor-not-allowed disabled:opacity-60"
+            className="mt-2 border-2 border-[#3b82f6] bg-[#3b82f6] px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[4px_4px_0px_0px_#1e40af] transition hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#1e40af] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "submitting" ? "SUBMITTING..." : "[ DEPLOY CONTRACT ]"}
+            {status === "submitting" ? "SUBMITTING TO BLOCKCHAIN..." : nftPreview ? "[ LIST NFT FOR AUCTION ]" : "[ CREATE AUCTION ]"}
           </button>
         </form>
       </div>
 
       {/* Right Column: Hosted Auctions Feed */}
       <div className="flex flex-col gap-6 border-t-2 border-[#1e1e2e] pt-10 lg:border-l-2 lg:border-t-0 lg:pl-10 lg:pt-0">
-        <h2 className="text-xs font-bold uppercase tracking-widest text-[#44445a]">
-          // YOUR DEPLOYMENTS
-        </h2>
-
+        <h2 className="text-xs font-bold uppercase tracking-widest text-[#44445a]">YOUR DEPLOYMENTS</h2>
         {myHostedAuctions.length === 0 ? (
           <div className="border-2 border-dashed border-[#1e1e2e] p-8 text-center">
             <p className="font-mono text-xs text-[#6b6b80]">NO_ACTIVE_HOSTS</p>
@@ -255,30 +495,15 @@ export default function CreateAuctionPage() {
           <div className="flex flex-col gap-4">
             {myHostedAuctions.map((auction) => {
               const isEnded = Math.floor(Date.now() / 1000) >= auction.endTime;
-              
               return (
-                <Link
-                  href={`/auction/${auction.id}`}
-                  key={auction.id.toString()}
-                  className="group block border-2 border-[#1e1e2e] bg-[#0a0a0f] p-4 transition hover:border-[#3b82f6]"
-                >
+                <Link href={`/auction/${auction.id}`} key={auction.id.toString()} className="group block border-2 border-[#1e1e2e] bg-[#0a0a0f] p-4 transition hover:border-[#3b82f6]">
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="font-mono text-xs font-bold text-[#e8e8f0]">
-                      ID #{auction.id.toString()}
-                    </span>
-                    <span
-                      className={`text-[10px] font-bold uppercase tracking-wider ${
-                        isEnded ? "text-[#ef4444]" : "text-[#22c55e]"
-                      }`}
-                    >
-                      {isEnded ? "ENDED" : "LIVE"}
-                    </span>
+                    <span className="font-mono text-xs font-bold text-[#e8e8f0]">ID #{auction.id.toString()}</span>
+                    <span className={`text-[10px] font-bold uppercase tracking-wider ${isEnded ? "text-[#ef4444]" : "text-[#22c55e]"}`}>{isEnded ? "ENDED" : "LIVE"}</span>
                   </div>
                   <div className="flex items-center justify-between text-[10px] uppercase text-[#6b6b80]">
                     <span>BIDS: {auction.highestBid > 0n ? "YES" : "NO"}</span>
-                    <span className="text-[#3b82f6] opacity-0 transition group-hover:opacity-100">
-                      VIEW &rarr;
-                    </span>
+                    <span className="text-[#3b82f6] opacity-0 transition group-hover:opacity-100">VIEW &rarr;</span>
                   </div>
                 </Link>
               );
@@ -286,7 +511,20 @@ export default function CreateAuctionPage() {
           </div>
         )}
       </div>
-
     </main>
+  );
+}
+
+export default function CreateAuctionPage() {
+  return (
+    <Suspense fallback={
+      <main className="mx-auto flex w-full max-w-2xl flex-1 flex-col items-center gap-6 px-6 py-16">
+        <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-10 text-center">
+          <p className="font-mono text-xs text-[#44445a]">LOADING...</p>
+        </div>
+      </main>
+    }>
+      <CreateAuctionInner />
+    </Suspense>
   );
 }

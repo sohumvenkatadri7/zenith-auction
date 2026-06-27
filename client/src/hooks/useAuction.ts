@@ -6,6 +6,7 @@ import { useAuctionStore, type AuctionDetails } from "@/store/auctionStore";
 import {
   NETWORK,
   CONTRACT_ADDRESS,
+  NFT_CONTRACT_ADDRESS,
   AUCTION_IDS_KEY,
 } from "@/lib/constants";
 
@@ -65,6 +66,16 @@ function addKnownAuctionId(id: bigint) {
       JSON.stringify(ids.map((i) => i.toString())),
     );
   }
+}
+
+function removeKnownAuctionId(id: bigint) {
+  if (typeof window === "undefined") return;
+  const ids = getKnownAuctionIds();
+  const filtered = ids.filter((i) => i.toString() !== id.toString());
+  localStorage.setItem(
+    AUCTION_IDS_KEY,
+    JSON.stringify(filtered.map((i) => i.toString())),
+  );
 }
 
 /**
@@ -170,27 +181,97 @@ export function useAuction() {
     return submitTx("init", []);
   }, [submitTx]);
 
+  const approveNft = useCallback(
+    async (tokenAddress: string, tokenId: bigint): Promise<string> => {
+      const server = getServer();
+      if (!server || !address) throw new Error("Wallet not connected");
+
+      const nftContract = new Contract(tokenAddress);
+      const source = await server.getAccount(address);
+
+      const tx = new TransactionBuilder(source, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK.networkPassphrase,
+      })
+        .addOperation(
+          nftContract.call(
+            "approve",
+            new Address(address).toScVal(),
+            new Address(CONTRACT_ADDRESS).toScVal(),
+            nativeToScVal(tokenId, { type: "i128" }),
+          ),
+        )
+        .setTimeout(30)
+        .build();
+
+      const sim = await server.simulateTransaction(tx);
+      if ("error" in sim) {
+        throw new Error(`Approve simulation failed: ${sim.error}`);
+      }
+
+      const assembled = assembleTransaction(tx, sim);
+      const signedXdr = await signTx(
+        assembled.build().toXDR(),
+        NETWORK.networkPassphrase,
+      );
+
+      const sendResult = await server.sendTransaction(
+        TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase),
+      );
+
+      if (sendResult.status === "PENDING") {
+        const txResult = await server.pollTransaction(sendResult.hash, {
+          attempts: 30,
+        });
+        if (txResult.status !== "SUCCESS") {
+          const detail =
+            "resultXdr" in txResult ? String(txResult.resultXdr) : "no result";
+          throw new Error(`Approve failed: ${txResult.status} — ${detail}`);
+        }
+        return txResult.txHash;
+      }
+      throw new Error(`Approve send returned: ${sendResult.status}`);
+    },
+    [address, signTx],
+  );
+
   const createAuction = useCallback(
     async (
       creator: string,
       token: string,
+      tokenId: bigint,
       bidToken: string,
       startPrice: bigint,
       startTime: number,
       endTime: number,
+      isPrivate: boolean,
+      allowlist: string[],
     ): Promise<bigint> => {
+      // If the token is the NFT contract, approve the auction contract to transfer first
+      if (token === NFT_CONTRACT_ADDRESS) {
+        await approveNft(token, tokenId);
+      }
+
+      // Format allowlist as a Soroban Vec<Address> using XDR directly
+      const allowlistScVals = allowlist.map((addr) => new Address(addr).toScVal());
+      const allowlistVec = xdr.ScVal.scvVec(allowlistScVals);
+
+      // Contract param order: creator, token, token_id, bid_token, start_price, start_time, end_time, is_private, allowlist
       const params = [
         new Address(creator).toScVal(),
         new Address(token).toScVal(),
+        nativeToScVal(tokenId, { type: "i128" }),
         new Address(bidToken).toScVal(),
         nativeToScVal(startPrice, { type: "i128" }),
         nativeToScVal(startTime, { type: "u64" }),
         nativeToScVal(endTime, { type: "u64" }),
+        xdr.ScVal.scvBool(isPrivate),
+        allowlistVec,
       ];
       await submitTx("create_auction", params);
       return 0n;
     },
-    [submitTx],
+    [submitTx, approveNft],
   );
 
   const placeBid = useCallback(
@@ -267,7 +348,16 @@ export function useAuction() {
         const sim = await server.simulateTransaction(tx);
 
         if ("error" in sim) {
-          if (manageState) setError(`Simulation error: ${sim.error}`);
+          const errMsg = String(sim.error ?? "");
+          // Detect contract NotFound (Error(Contract, #1)) — auction doesn't exist on-chain
+          const isNotFound = /Error\(Contract,\s*#1\)/i.test(errMsg);
+          if (isNotFound) {
+            // Clean up stale ID from localStorage registry
+            removeKnownAuctionId(auctionId);
+          }
+          if (manageState) {
+            setError(isNotFound ? `AUCTION #${auctionId} DOES NOT EXIST ON-CHAIN` : `Simulation error: ${errMsg}`);
+          }
           return null;
         }
 
@@ -282,6 +372,7 @@ export function useAuction() {
           id: BigInt(String(raw.id ?? auctionId.toString())),
           creator: String(raw.creator ?? ""),
           token: String(raw.token ?? ""),
+          token_id: BigInt(String(raw.token_id ?? "0")),
           bidToken: String(raw.bid_token ?? ""),
           startPrice: BigInt(String(raw.start_price ?? "0")),
           highestBid: BigInt(String(raw.highest_bid ?? "0")),
@@ -290,6 +381,10 @@ export function useAuction() {
           endTime: Number(raw.end_time ?? 0),
           ended: Boolean(raw.ended ?? false),
           claimed: Boolean(raw.claimed ?? false),
+          isPrivate: Boolean(raw.is_private ?? false),
+          allowlist: Array.isArray(raw.allowlist)
+            ? raw.allowlist.map((addr: unknown) => String(addr))
+            : [],
         };
 
         setAuction(details);
@@ -339,6 +434,42 @@ export function useAuction() {
       setLoading(false);
     }
   }, [getAuctionDetails, setAuctions, setLoading, setError]);
+
+  // ──────────────────────────────────────────────
+  //  TOKEN BALANCE QUERY
+  // ──────────────────────────────────────────────
+
+  const getTokenBalance = useCallback(
+    async (tokenAddress: string, holderAddress: string): Promise<bigint | null> => {
+      const server = getServer();
+      if (!server) return null;
+      try {
+        const tokenContract = new Contract(tokenAddress);
+        const source = new Account(
+          "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
+          "0",
+        );
+        const tx = new TransactionBuilder(source, {
+          fee: BASE_FEE,
+          networkPassphrase: NETWORK.networkPassphrase,
+        })
+          .addOperation(
+            tokenContract.call(
+              "balance",
+              new Address(holderAddress).toScVal(),
+            ),
+          )
+          .setTimeout(30)
+          .build();
+        const sim = await server.simulateTransaction(tx);
+        if ("error" in sim || !sim.result?.retval) return null;
+        return BigInt(String(scValToNative(sim.result.retval)));
+      } catch {
+        return null;
+      }
+    },
+    [],
+  );
 
   // ──────────────────────────────────────────────
   //  EVENT POLLING
@@ -401,6 +532,7 @@ export function useAuction() {
 
   return {
     initContract,
+    approveNft,
     createAuction,
     placeBid,
     claimWinning,
@@ -408,7 +540,9 @@ export function useAuction() {
     getAuctionDetails,
     fetchAllAuctions,
     pollBidEvents,
+    getTokenBalance,
     addKnownAuctionId,
+    removeKnownAuctionId,
     getKnownAuctionIds,
   };
 }

@@ -3,7 +3,12 @@ export const NETWORK = {
   networkPassphrase: "Test SDF Network ; September 2015",
 } as const;
 
-export const CONTRACT_ADDRESS = "CA46B2LHS67SLQGONAF3OPSQEZN5KXI26I2YH6SQTXWX75SV5S5JQPSW" ;
+export const CONTRACT_ADDRESS = "CB3MSS4J3YZCJXKP67KTUN2SR6LPPK3XZCJUSTCZ7BFSMFHBMCMY7FTY";
+
+/** NFT Contract — NonFungibleToken (Soroban)
+ * Handles mint/transfer/ownerOf for IPFS-linked assets.
+ */
+export const NFT_CONTRACT_ADDRESS = "CDVMGOJB2OUCJQXUKVCBMOXPQXYPTARRP4BDPZFDBIGTLGRLIIA5PB4P";
 
 export const STELLAR_EXPIRATION_MARGIN = 300; // seconds added to TimeBounds
 
