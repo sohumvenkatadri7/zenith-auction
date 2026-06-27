@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { JetBrains_Mono, Inter } from "next/font/google";
 import "./globals.css";
 import Navbar from "@/components/Navbar";
+import WalletAutoConnect from "@/components/WalletAutoConnect";
 
 const mono = JetBrains_Mono({
   variable: "--font-mono",
@@ -28,6 +29,7 @@ export default function RootLayout({
     <html lang="en" className={`${mono.variable} ${sans.variable}`}>
       <body className="scanlines grid-bg flex min-h-screen flex-col bg-[#0a0a0f] text-[#e8e8f0]">
         <Navbar />
+        <WalletAutoConnect />
         <div className="flex min-h-screen flex-col">{children}</div>
       </body>
     </html>

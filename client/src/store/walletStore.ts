@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { TransactionBuilder } from "@stellar/stellar-sdk";
+import { createJSONStorage, persist } from "zustand/middleware";
 
 interface WalletState {
   address: string | null;
@@ -12,88 +12,110 @@ interface WalletState {
   disconnect: () => void;
   signTx: (xdr: string, networkPassphrase: string) => Promise<string>;
   signAndSend: (tx: any) => Promise<any>;
+  autoConnect: () => Promise<void>;
 }
 
-export const useWalletStore = create<WalletState>((set) => ({
-  address: null,
-  isConnecting: false,
-  error: null,
-  setAddress: (address) => set({ address, error: null }),
+export const useWalletStore = create<WalletState>()(
+  persist(
+    (set, get) => ({
+      address: null,
+      isConnecting: false,
+      error: null,
+      setAddress: (address) => set({ address, error: null }),
 
-  connect: async (walletId: string) => {
-    set({ isConnecting: true, error: null });
-    try {
-      const { requestAccess } = await import("@stellar/freighter-api");
-      const { address } = await requestAccess();
-      set({ address, isConnecting: false });
-      console.log("Connected to:", address);
-    } catch (err) {
-      set({ isConnecting: false, error: err instanceof Error ? err.message : "Connection failed" });
-      console.error("Connection denied by user", err);
-    }
-  },
-
-  disconnect: () => {
-    set({ address: null, error: null });
-  },
-
-  signTx: async (xdr: string, networkPassphrase: string): Promise<string> => {
-    try {
-      const { signTransaction } = await import("@stellar/freighter-api");
-      const result = await signTransaction(xdr, { networkPassphrase });
-      // signTransaction returns { signedTxXdr, signerAddress }
-      if (result.error) {
-        // Freighter can return error as string or { message: string }
-        const msg = typeof result.error === "string"
-          ? result.error
-          : (result.error.message || "Signing failed");
-        // Distinguish user-initiated cancellation from real errors
-        if (/rejected|cancelled|canceled|denied/i.test(msg)) {
-          throw new Error("Wallet signing was cancelled.");
+      connect: async (walletId: string) => {
+        set({ isConnecting: true, error: null });
+        try {
+          const { requestAccess } = await import("@stellar/freighter-api");
+          const { address } = await requestAccess();
+          set({ address, isConnecting: false });
+          console.log("Connected to:", address);
+        } catch (err) {
+          set({ isConnecting: false, error: err instanceof Error ? err.message : "Connection failed" });
+          console.error("Connection denied by user", err);
         }
-        throw new Error(msg);
-      }
-      return result.signedTxXdr;
-    } catch (err) {
-      // Only log surprising errors to console, not expected user cancellations
-      if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
-        console.error("Transaction signing failed:", err);
-      }
-      throw err;
-    }
-  },
+      },
 
-  signAndSend: async (tx: any) => {
-    const TESTNET = "Test SDF Network ; September 2015";
-    try {
-      // Step 1: Sign with Freighter
-      const { signTransaction } = await import("@stellar/freighter-api");
-      const signResult = await signTransaction(tx.toXDR(), { networkPassphrase: TESTNET });
+      disconnect: () => {
+        set({ address: null, error: null });
+      },
 
-      if (signResult.error) {
-        const msg = typeof signResult.error === "string"
-          ? signResult.error
-          : (signResult.error.message || "Signing failed");
-        if (/rejected|cancelled|canceled|denied/i.test(msg)) {
-          throw new Error("Wallet signing was cancelled.");
+      signTx: async (xdr: string, networkPassphrase: string): Promise<string> => {
+        try {
+          const { signTransaction } = await import("@stellar/freighter-api");
+          const result = await signTransaction(xdr, { networkPassphrase });
+          if (result.error) {
+            const msg = typeof result.error === "string"
+              ? result.error
+              : (result.error.message || "Signing failed");
+            if (/rejected|cancelled|canceled|denied/i.test(msg)) {
+              throw new Error("Wallet signing was cancelled.");
+            }
+            throw new Error(msg);
+          }
+          return result.signedTxXdr;
+        } catch (err) {
+          if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
+            console.error("Transaction signing failed:", err);
+          }
+          throw err;
         }
-        throw new Error(msg);
-      }
+      },
 
-      // Step 2: Reconstruct the signed transaction from XDR
-      const { rpc, TransactionBuilder } = await import("@stellar/stellar-sdk");
-      const signedTx = TransactionBuilder.fromXDR(signResult.signedTxXdr, TESTNET);
+      signAndSend: async (tx: any) => {
+        const TESTNET = "Test SDF Network ; September 2015";
+        try {
+          const { signTransaction } = await import("@stellar/freighter-api");
+          const signResult = await signTransaction(tx.toXDR(), { networkPassphrase: TESTNET });
 
-      // Step 3: Broadcast via Soroban RPC
-      const server = new rpc.Server("https://soroban-testnet.stellar.org");
-      const sendResult = await server.sendTransaction(signedTx);
+          if (signResult.error) {
+            const msg = typeof signResult.error === "string"
+              ? signResult.error
+              : (signResult.error.message || "Signing failed");
+            if (/rejected|cancelled|canceled|denied/i.test(msg)) {
+              throw new Error("Wallet signing was cancelled.");
+            }
+            throw new Error(msg);
+          }
 
-      return sendResult;
-    } catch (err) {
-      if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
-        console.error("signAndSend failed:", err);
-      }
-      throw err;
+          const { rpc, TransactionBuilder } = await import("@stellar/stellar-sdk");
+          const signedTx = TransactionBuilder.fromXDR(signResult.signedTxXdr, TESTNET);
+
+          const server = new rpc.Server("https://soroban-testnet.stellar.org");
+          const sendResult = await server.sendTransaction(signedTx);
+
+          return sendResult;
+        } catch (err) {
+          if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
+            console.error("signAndSend failed:", err);
+          }
+          throw err;
+        }
+      },
+
+      autoConnect: async () => {
+        if (typeof window === "undefined") return;
+
+        try {
+          const { isAllowed, getAddress } = await import("@stellar/freighter-api");
+          const allowed = await isAllowed();
+          if (allowed) {
+            const { address } = await getAddress();
+            set({ address: address || null, error: null });
+            console.log("Auto-connected to:", address);
+          } else {
+            // Clear persisted address if no longer authorized
+            set({ address: null, error: null });
+          }
+        } catch (err) {
+          console.log("Auto-connect failed (user may not have Freighter installed or connected):", err);
+        }
+      },
+    }),
+    {
+      name: "wallet-storage",
+      storage: createJSONStorage(() => localStorage),
+      partialize: (state) => ({ address: state.address }),
     }
-  },
-}));
+  )
+);
