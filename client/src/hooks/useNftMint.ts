@@ -51,6 +51,7 @@ interface UseNftMintReturn {
   result: MintResult | null;
   error: string | null;
   mint: (title: string, description: string, file: File) => Promise<MintResult>;
+  burnNft: (tokenId: string) => Promise<string>;
   initializeContract: () => Promise<string>;
   reset: () => void;
 }
@@ -373,12 +374,85 @@ export function useNftMint(): UseNftMintReturn {
     [address, signTx],
   );
 
+  const burnNft = useCallback(async (tokenId: string): Promise<string> => {
+    const caller = address;
+    if (!caller) throw new Error("Wallet not connected");
+
+    const server = getServer();
+    const contract = getNftContract();
+    if (!server || !contract) throw new Error("Soroban RPC or NFT contract not configured");
+
+    setPhase("confirming");
+    setError(null);
+
+    try {
+      const source = await server.getAccount(caller);
+      const tx = new TransactionBuilder(source, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK.networkPassphrase,
+      })
+        .addOperation(
+          contract.call(
+            "burn",
+            new Address(caller).toScVal(),
+            nativeToScVal(tokenId, { type: "i128" }),
+          ),
+        )
+        .setTimeout(30)
+        .build();
+
+      const sim = await server.simulateTransaction(tx);
+      if ("error" in sim) {
+        throw new Error(`Burn simulation failed: ${String((sim as { error?: unknown }).error)}`);
+      }
+
+      const assembled = assembleTransaction(tx, sim);
+      const preparedTx = assembled.build();
+      const signedXdr = await signTx(preparedTx.toXDR(), NETWORK.networkPassphrase);
+
+      const sendResult = await server.sendTransaction(
+        TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase),
+      );
+
+      if (sendResult.status !== "PENDING") {
+        throw new Error(`Send returned unexpected status: ${sendResult.status}`);
+      }
+
+      const txResult = await server.pollTransaction(sendResult.hash, { attempts: 30 });
+      if (txResult.status !== "SUCCESS") {
+        let detail = "no result available";
+        if ("resultXdr" in txResult && txResult.resultXdr) {
+          detail = typeof txResult.resultXdr === "object"
+            ? JSON.stringify(txResult.resultXdr)
+            : String(txResult.resultXdr);
+        }
+        throw new Error(`Burn failed: ${txResult.status} — ${detail}`);
+      }
+
+      // Remove from local store
+      useNftStore.getState().removeNft(tokenId);
+
+      setPhase("success");
+      return txResult.txHash;
+    } catch (err: any) {
+      setPhase("error");
+      const message =
+        err instanceof Error
+          ? parseLedgerError(err.message)
+          : "AN UNKNOWN ERROR OCCURRED.";
+      setError(message);
+      console.error("RAW BURN ERROR:", err.message);
+      throw err;
+    }
+  }, [address, signTx]);
+
   return {
     phase,
     phaseLabel: PHASE_LABELS[phase],
     result,
     error,
     mint,
+    burnNft,
     initializeContract,
     reset,
   };

@@ -1,12 +1,13 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { useWalletStore } from "@/store/walletStore";
 import { useNftStore, type MintedNft } from "@/store/nftStore";
 import { useNftGallery, type OnChainNft } from "@/hooks/useNftGallery";
+import { useNftMint } from "@/hooks/useNftMint";
 
 function truncate(str: string, chars = 6): string {
   if (str.length <= chars * 2 + 3) return str;
@@ -25,10 +26,11 @@ function timeAgo(ms: number): string {
   return `${d}d AGO`;
 }
 
-function NftCard({ nft, onDelete }: { nft: MintedNft; onDelete?: () => void }) {
+function NftCard({ nft, onDelete, onBurn }: { nft: MintedNft; onDelete?: () => void; onBurn?: () => void }) {
   const router = useRouter();
   const [imgError, setImgError] = useState(false);
   const [confirming, setConfirming] = useState(false);
+  const [burnConfirming, setBurnConfirming] = useState(false);
 
   return (
     <div className="group relative flex flex-col border-2 border-[#1e1e2e] bg-[#0a0a0f] shadow-[4px_4px_0px_0px_#050508] transition hover:-translate-x-1 hover:-translate-y-1 hover:border-[#3b82f6] hover:shadow-[6px_6px_0px_0px_#1e40af]">
@@ -141,6 +143,27 @@ function NftCard({ nft, onDelete }: { nft: MintedNft; onDelete?: () => void }) {
           >
             VIEW ON IPFS &rarr;
           </a>
+          {onBurn && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (burnConfirming) {
+                  onBurn();
+                } else {
+                  setBurnConfirming(true);
+                  setTimeout(() => setBurnConfirming(false), 3000);
+                }
+              }}
+              className={`flex items-center justify-center border-2 px-4 py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+                burnConfirming
+                  ? "border-[#ef4444] bg-[#ef4444]/20 text-[#ef4444]"
+                  : "border-[#1e1e2e] bg-[#0e0e16] text-[#6b6b80] hover:border-[#ef4444] hover:text-[#ef4444]"
+              }`}
+            >
+              {burnConfirming ? "CONFIRM BURN?" : "BURN NFT"}
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -196,6 +219,16 @@ export default function NftsPage() {
   const { address } = useWalletStore();
   const { nfts } = useNftStore();
   const { onChainNfts, isLoading: onChainLoading, error: onChainError, refresh } = useNftGallery();
+  const { burnNft } = useNftMint();
+
+  const handleBurn = useCallback(async (tokenId: string) => {
+    try {
+      await burnNft(tokenId);
+      refresh();
+    } catch (err) {
+      console.error("Burn failed:", err);
+    }
+  }, [burnNft, refresh]);
 
   const myLocalNfts = address
     ? nfts.filter((n) => n.owner === address)
@@ -282,6 +315,7 @@ export default function NftsPage() {
                     ? () => useNftStore.getState().removeNft(nft.tokenId)
                     : undefined
                 }
+                onBurn={() => handleBurn(nft.tokenId)}
               />
             ))}
           </div>

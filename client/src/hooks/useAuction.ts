@@ -149,7 +149,7 @@ export function useAuction() {
         .build();
       
       const sim = await server.simulateTransaction(tx);
-      const nextId = sim.result?.retval ? Number(scValToNative(sim.result.retval)) : 1;
+      const nextId = "result" in sim && sim.result?.retval ? Number(scValToNative(sim.result.retval)) : 1;
 
       const auctionPromises = [];
       for (let i = 1; i < nextId; i++) {
@@ -185,7 +185,7 @@ export function useAuction() {
         .build();
 
       const sim = await server.simulateTransaction(tx);
-      if ("error" in sim || !sim.result?.retval) {
+      if (!("result" in sim) || !sim.result?.retval) {
         if (manageState) setError(`AUCTION #${auctionId} NOT FOUND`);
         return null;
       }
@@ -278,7 +278,7 @@ export function useAuction() {
           .setTimeout(30)
           .build();
         const sim = await server.simulateTransaction(tx);
-        return sim.result?.retval ? BigInt(String(scValToNative(sim.result.retval))) : null;
+        return "result" in sim && sim.result?.retval ? BigInt(String(scValToNative(sim.result.retval))) : null;
       } catch { return null; }
   }, []);
 
