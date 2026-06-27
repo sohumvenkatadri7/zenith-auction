@@ -37,12 +37,20 @@ pub struct NFTTransferred {
     pub to: Address,
 }
 
+// FEATURE: BURN-TO-REDEEM
+#[contractevent]
+pub struct NFTBurned {
+    pub token_id: i128,
+    pub owner: Address,
+}
+
 #[contract]
 pub struct NonFungibleToken;
 
 #[contractimpl]
 impl NonFungibleToken {
     /// Initializes the contract setting the administrative authority
+    /// (Kept intact so your frontend `initializeContract` sequence doesn't break)
     pub fn initialize(env: Env, admin: Address) -> Result<(), NFTError> {
         if env.storage().instance().has(&DataKey::Admin) {
             return Err(NFTError::TokenAlreadyExists);
@@ -54,13 +62,9 @@ impl NonFungibleToken {
 
     /// Mints a new unique token ID linked to an unchangeable IPFS metadata URI
     pub fn mint(env: Env, to: Address, metadata_uri: String) -> Result<i128, NFTError> {
-        // Authenticate admin authority
-        let admin: Address = env
-            .storage()
-            .instance()
-            .get(&DataKey::Admin)
-            .ok_or(NFTError::NotInitialized)?;
-        admin.require_auth();
+        // FIX: The user minting the asset authorizes their own transaction.
+        // No longer restricted to the contract Admin!
+        to.require_auth();
 
         // Get the next valid automated Token ID
         let token_id: i128 = env
@@ -79,7 +83,7 @@ impl NonFungibleToken {
         // Stream real-time mint event on ledger
         NFTMinted {
             token_id,
-            owner: to,
+            owner: to.clone(),
             metadata_uri,
         }
         .publish(&env);
@@ -169,4 +173,32 @@ impl NonFungibleToken {
 
         Ok(())
     }
-} 
+
+    /// FEATURE: BURN-TO-REDEEM
+    /// Destroys the digital asset. Used when the physical item is claimed in the real world.
+    pub fn burn(env: Env, from: Address, token_id: i128) -> Result<(), NFTError> {
+        from.require_auth();
+
+        let current_owner: Address = env
+            .storage().instance().get(&DataKey::TokenOwner(token_id))
+            .ok_or(NFTError::TokenNotFound)?;
+
+        if current_owner != from {
+            return Err(NFTError::NotAuthorized);
+        }
+
+        // Permanently erase the token state from the ledger
+        env.storage().instance().remove(&DataKey::TokenOwner(token_id));
+        env.storage().instance().remove(&DataKey::TokenUri(token_id));
+        env.storage().instance().remove(&DataKey::Approval(token_id));
+
+        // Stream real-time burn event on ledger
+        NFTBurned {
+            token_id,
+            owner: from,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+}

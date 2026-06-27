@@ -166,8 +166,12 @@ export function useNftMint(): UseNftMintReturn {
           attempts: 30,
         });
         if (txResult.status !== "SUCCESS") {
-          const detail =
-            "resultXdr" in txResult ? String(txResult.resultXdr) : "no result";
+          let detail = "no result";
+          if ("resultXdr" in txResult && txResult.resultXdr) {
+             detail = typeof txResult.resultXdr === "object" 
+                ? JSON.stringify(txResult.resultXdr) 
+                : String(txResult.resultXdr);
+          }
           throw new Error(`Initialize failed: ${txResult.status} — ${detail}`);
         }
         return txResult.txHash;
@@ -273,8 +277,6 @@ export function useNftMint(): UseNftMintReturn {
           );
         }
 
-        // Extract the expected token ID from simulation (may differ if another
-        // mint lands between sim and execution — acceptable for UX display)
         let expectedTokenId = "0";
         if (sim.result?.retval) {
           try {
@@ -311,13 +313,18 @@ export function useNftMint(): UseNftMintReturn {
         });
 
         if (txResult.status !== "SUCCESS") {
-          const detail =
-            "resultXdr" in txResult
-              ? String(txResult.resultXdr)
-              : "no result available";
-          throw new Error(
-            `Transaction failed: ${txResult.status} — ${detail}`,
-          );
+          // FIX: Safely parse the object to prevent "[object Object]"
+          let detail = "no result available";
+          if ("resultXdr" in txResult && txResult.resultXdr) {
+             detail = typeof txResult.resultXdr === "object" 
+                ? JSON.stringify(txResult.resultXdr) 
+                : String(txResult.resultXdr);
+          }
+          
+          // Dump the full RPC response object to the console for deep debugging
+          console.error("FULL RPC TX_RESULT DUMP:", JSON.stringify(txResult, null, 2));
+          
+          throw new Error(`Transaction failed: ${txResult.status} — ${detail}`);
         }
 
         const mintResult: MintResult = {
@@ -343,7 +350,7 @@ export function useNftMint(): UseNftMintReturn {
         setPhase("success");
         setResult(mintResult);
         return mintResult;
-      } catch (err: unknown) {
+      } catch (err: any) {
         setPhase("error");
         const message =
           err instanceof Error
@@ -351,8 +358,13 @@ export function useNftMint(): UseNftMintReturn {
             : "AN UNKNOWN ERROR OCCURRED.";
         setError(message);
 
+        // FIX: Deep JSON logging to extract the real reason Soroban rejected it
         if (err instanceof Error) {
-          console.error("RAW NFT MINT ERROR:", err.message);
+          console.error("RAW NFT MINT ERROR MESSAGE:", err.message);
+        }
+        
+        if (typeof err === 'object' && err !== null) {
+           console.error("DETAILED ERROR OBJECT:", JSON.stringify(err, null, 2));
         }
 
         throw err;

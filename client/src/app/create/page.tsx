@@ -40,6 +40,10 @@ const parseErrorMessage = (rawError: string): string => {
     return "CONTRACT REJECTED INPUT: DOUBLE CHECK YOUR DATES AND TOKEN ADDRESSES.";
   if (err.includes("TIMEOUT") || err.includes("NETWORK")) 
     return "NETWORK TIMEOUT: THE STELLAR NETWORK TOOK TOO LONG TO RESPOND.";
+  if (err.includes("TRY_AGAIN_LATER"))
+    return "NETWORK BUSY: THE STELLAR RPC IS RATE-LIMITING. TRY AGAIN IN A FEW SECONDS.";
+  if (err.includes("TRANSFER_FROM"))
+    return "NFT TRANSFER FAILED: THE CONTRACT COULD NOT MOVE YOUR TOKEN. MAKE SURE YOU OWN THIS NFT AND HAVE APPROVED THE AUCTION.";
     
   // Fallback for unknown errors
   return "TRANSACTION FAILED: CHECK CONSOLE FOR DETAILS.";
@@ -52,7 +56,7 @@ function CreateAuctionInner() {
   const searchParams = useSearchParams();
   const { address } = useWalletStore();
   const { auctions } = useAuctionStore();
-  const { createAuction, addKnownAuctionId, fetchAllAuctions } = useAuction();
+  const { createAuction, fetchAllAuctions } = useAuction();
 
   // Read NFT params from URL
   const urlTokenId = searchParams.get("tokenId");
@@ -181,22 +185,44 @@ function CreateAuctionInner() {
       setMessage("");
 
       try {
-        const knownIds = JSON.parse(localStorage.getItem("zenith_known_auction_ids") || "[]");
-        const nextId = knownIds.length > 0 ? Math.max(...knownIds.map(Number)) + 1 : 1;
+        // ── FIX: RESILIENT RETRY WRAPPER ──
+        let retryCount = 0;
+        const maxRetries = 3;
+        let isSuccess = false;
 
-        await createAuction(
-          address,
-          cleanTokenAddress,
-          BigInt(tokenIdParsed),
-          finalBidTokenAddress, 
-          priceBigInt,
-          startTs,
-          endTs,
-          isPrivate,
-          allowlistAddresses,
-        );
+        while (retryCount < maxRetries && !isSuccess) {
+          try {
+            await createAuction(
+              address,
+              cleanTokenAddress,
+              BigInt(tokenIdParsed),
+              finalBidTokenAddress, 
+              priceBigInt,
+              startTs,
+              endTs,
+              isPrivate,
+              allowlistAddresses,
+            );
+            isSuccess = true;
+          } catch (err: any) {
+            // Check if it's specifically a rate-limit error, and if we have retries left
+            if (err.message && err.message.includes("TRY_AGAIN_LATER") && retryCount < maxRetries - 1) {
+              retryCount++;
+              console.warn(`RPC is busy. Retrying transaction... (${retryCount}/${maxRetries})`);
+              setMessage(`NETWORK BUSY. RETRYING... (${retryCount}/${maxRetries})`);
+              await new Promise((resolve) => setTimeout(resolve, 2000)); // Wait 2 seconds
+            } else {
+              throw err; // If it's a real error (like insufficient funds) or we are out of retries, throw it
+            }
+          }
+        }
 
-        addKnownAuctionId(BigInt(nextId));
+        // Refetch auctions from blockchain to get the new ID
+        await fetchAllAuctions();
+        const refreshedAuctions = useAuctionStore.getState().auctions;
+        const nextId = refreshedAuctions.length > 0
+          ? Math.max(...refreshedAuctions.map(a => Number(a.id)))
+          : 1;
 
         setStatus("success");
         setMessage(`AUCTION #${nextId} CREATED. REDIRECTING...`);
@@ -207,7 +233,6 @@ function CreateAuctionInner() {
       } catch (err: unknown) {
         setStatus("error");
         
-        // ── USE THE NEW ERROR PARSER HERE ──
         if (err instanceof Error) {
           setMessage(parseErrorMessage(err.message));
           // Log the raw ugly error to the console for your debugging purposes
@@ -217,7 +242,7 @@ function CreateAuctionInner() {
         }
       }
     },
-    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, startTime, endTime, isPrivate, allowlistInput, createAuction, addKnownAuctionId, router, nftPreview, urlTokenId]
+    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, startTime, endTime, isPrivate, allowlistInput, createAuction, fetchAllAuctions, router, nftPreview, urlTokenId]
   );
 
   const inputClass = "w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-sm text-[#e8e8f0] outline-none transition placeholder:text-[#44445a] disabled:opacity-50 focus:border-[#3b82f6]";

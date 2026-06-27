@@ -7,7 +7,6 @@ import {
   NETWORK,
   CONTRACT_ADDRESS,
   NFT_CONTRACT_ADDRESS,
-  AUCTION_IDS_KEY,
 } from "@/lib/constants";
 
 import {
@@ -24,461 +23,264 @@ import {
 
 const { Server, assembleTransaction } = rpc;
 
-/**
- * Attempts to create a Soroban RPC server connection.
- * Returns `null` if no URL is configured (graceful fallback).
- */
+// ── Helpers ────────────────────────────────────────────────────────────
 function getServer() {
   if (!NETWORK.rpcUrl) return null;
   return new Server(NETWORK.rpcUrl, { allowHttp: true });
 }
 
-/**
- * Attempts to create a Contract instance from the configured address.
- * Returns `null` if no address is set.
- */
-function getContract(): Contract | null {
-  if (!CONTRACT_ADDRESS) return null;
+function getAuctionContract() {
   return new Contract(CONTRACT_ADDRESS);
 }
 
-// ── Local auction ID registry ──────────────────────────────────────
+// ── Error Decoder ──────────────────────────────────────────────────────
+function parseContractError(rawError: string, contractAddr: string): string | null {
+  const match = rawError.match(/Error\(Contract,\s*#(\d+)\)/);
+  if (!match) return null;
+  const code = parseInt(match[1], 10);
 
-function getKnownAuctionIds(): bigint[] {
-  if (typeof window === "undefined") return [];
-  try {
-    const raw = localStorage.getItem(AUCTION_IDS_KEY);
-    if (!raw) return [];
-    return JSON.parse(raw).map((id: string) => BigInt(id));
-  } catch {
-    return [];
+  if (contractAddr === NFT_CONTRACT_ADDRESS) {
+    switch (code) {
+      case 1: return "NOT AUTHORIZED: YOU DON'T OWN THIS NFT.";
+    }
   }
-}
-
-function addKnownAuctionId(id: bigint) {
-  if (typeof window === "undefined") return;
-  const ids = getKnownAuctionIds();
-  const idStr = id.toString();
-  if (!ids.some((i) => i.toString() === idStr)) {
-    ids.push(id);
-    localStorage.setItem(
-      AUCTION_IDS_KEY,
-      JSON.stringify(ids.map((i) => i.toString())),
-    );
+  if (contractAddr === CONTRACT_ADDRESS) {
+    switch (code) {
+      case 1: return "AUCTION NOT FOUND.";
+      case 2: return "AUCTION HAS NOT ENDED.";
+      case 3: return "ALREADY CLAIMED.";
+      case 4: return "BID TOO LOW.";
+      case 5: return "AUCTION NOT ACTIVE.";
+      case 6: return "NOT THE WINNER.";
+      case 7: return "NO BIDS.";
+      case 8: return "HAS BIDS.";
+      case 9: return "NOT ON ALLOWLIST.";
+    }
   }
+  return `CONTRACT ERROR #${code}.`;
 }
 
-function removeKnownAuctionId(id: bigint) {
-  if (typeof window === "undefined") return;
-  const ids = getKnownAuctionIds();
-  const filtered = ids.filter((i) => i.toString() !== id.toString());
-  localStorage.setItem(
-    AUCTION_IDS_KEY,
-    JSON.stringify(filtered.map((i) => i.toString())),
-  );
-}
-
-/**
- * Core hook for interacting with the Auction Soroban contract.
- */
+// ── Hook ───────────────────────────────────────────────────────────────
 export function useAuction() {
   const { address, signTx } = useWalletStore();
-  const {
-    setAuction,
-    setAuctions,
-    setLoading,
-    setError,
-  } = useAuctionStore();
+  const { setAuction, setAuctions, setLoading, setError } = useAuctionStore();
 
-  // ──────────────────────────────────────────────
-  //  CORE: build, simulate, sign, submit
-  // ──────────────────────────────────────────────
-
-  const submitTx = useCallback(
-    async (method: string, params: xdr.ScVal[]): Promise<string> => {
-      const server = getServer();
-      const contract = getContract();
-      const caller = address;
-      
-      if (!server || !contract || !caller)
-        throw new Error("Wallet not connected or contract not configured");
-
-      setLoading(true);
-      setError(null);
-
-      try {
-        const source = await server.getAccount(caller);
-
-        const tx = new TransactionBuilder(source, {
-          fee: BASE_FEE,
-          networkPassphrase: NETWORK.networkPassphrase,
-        })
-          .addOperation(contract.call(method, ...params))
-          .setTimeout(30)
-          .build();
-
-        const sim = await server.simulateTransaction(tx);
-
-        if ("error" in sim) {
-          throw new Error(`Simulation failed: ${sim.error}`);
-        }
-
-        const assembled = assembleTransaction(tx, sim);
-        const preparedTx = assembled.build();
-
-        // Using the global kit from the store for multi-wallet support
-        const signedXdr = await signTx(
-          preparedTx.toXDR(),
-          NETWORK.networkPassphrase,
-        );
-
-        const sendResult = await server.sendTransaction(
-          TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase),
-        );
-
-        if (sendResult.status === "PENDING") {
-          const txResult = await server.pollTransaction(sendResult.hash, {
-            attempts: 30,
-          });
-
-          if (txResult.status !== "SUCCESS") {
-            const detail =
-              "resultXdr" in txResult
-                ? String(txResult.resultXdr)
-                : "no result available";
-            throw new Error(
-              `Transaction failed: ${txResult.status} — ${detail}`,
-            );
-          }
-
-          return txResult.txHash;
-        }
-
-        throw new Error(
-          `Send returned unexpected status: ${sendResult.status}`,
-        );
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Unknown transaction error";
-        setError(message);
-        throw err;
-      } finally {
-        setLoading(false);
-      }
-    },
-    [address, signTx, setLoading, setError],
-  );
-
-  // ──────────────────────────────────────────────
-  //  WRITE METHODS
-  // ──────────────────────────────────────────────
-
-  const initContract = useCallback(async (): Promise<string> => {
-    return submitTx("init", []);
-  }, [submitTx]);
-
-  const approveNft = useCallback(
-    async (tokenAddress: string, tokenId: bigint): Promise<string> => {
-      const server = getServer();
-      if (!server || !address) throw new Error("Wallet not connected");
-
-      const nftContract = new Contract(tokenAddress);
-      const source = await server.getAccount(address);
-
-      const tx = new TransactionBuilder(source, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK.networkPassphrase,
-      })
-        .addOperation(
-          nftContract.call(
-            "approve",
-            new Address(address).toScVal(),
-            new Address(CONTRACT_ADDRESS).toScVal(),
-            nativeToScVal(tokenId, { type: "i128" }),
-          ),
-        )
-        .setTimeout(30)
-        .build();
-
-      const sim = await server.simulateTransaction(tx);
-      if ("error" in sim) {
-        throw new Error(`Approve simulation failed: ${sim.error}`);
-      }
-
-      const assembled = assembleTransaction(tx, sim);
-      const signedXdr = await signTx(
-        assembled.build().toXDR(),
-        NETWORK.networkPassphrase,
-      );
-
-      const sendResult = await server.sendTransaction(
-        TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase),
-      );
-
-      if (sendResult.status === "PENDING") {
-        const txResult = await server.pollTransaction(sendResult.hash, {
-          attempts: 30,
-        });
-        if (txResult.status !== "SUCCESS") {
-          const detail =
-            "resultXdr" in txResult ? String(txResult.resultXdr) : "no result";
-          throw new Error(`Approve failed: ${txResult.status} — ${detail}`);
-        }
-        return txResult.txHash;
-      }
-      throw new Error(`Approve send returned: ${sendResult.status}`);
-    },
-    [address, signTx],
-  );
-
-  const createAuction = useCallback(
-    async (
-      creator: string,
-      token: string,
-      tokenId: bigint,
-      bidToken: string,
-      startPrice: bigint,
-      startTime: number,
-      endTime: number,
-      isPrivate: boolean,
-      allowlist: string[],
-    ): Promise<bigint> => {
-      // If the token is the NFT contract, approve the auction contract to transfer first
-      if (token === NFT_CONTRACT_ADDRESS) {
-        await approveNft(token, tokenId);
-      }
-
-      // Format allowlist as a Soroban Vec<Address> using XDR directly
-      const allowlistScVals = allowlist.map((addr) => new Address(addr).toScVal());
-      const allowlistVec = xdr.ScVal.scvVec(allowlistScVals);
-
-      // Contract param order: creator, token, token_id, bid_token, start_price, start_time, end_time, is_private, allowlist
-      const params = [
-        new Address(creator).toScVal(),
-        new Address(token).toScVal(),
-        nativeToScVal(tokenId, { type: "i128" }),
-        new Address(bidToken).toScVal(),
-        nativeToScVal(startPrice, { type: "i128" }),
-        nativeToScVal(startTime, { type: "u64" }),
-        nativeToScVal(endTime, { type: "u64" }),
-        xdr.ScVal.scvBool(isPrivate),
-        allowlistVec,
-      ];
-      await submitTx("create_auction", params);
-      return 0n;
-    },
-    [submitTx, approveNft],
-  );
-
-  const placeBid = useCallback(
-    async (auctionId: bigint, amount: bigint): Promise<string> => {
-      const params = [
-        new Address(address!).toScVal(),
-        nativeToScVal(auctionId, { type: "u64" }),
-        nativeToScVal(amount, { type: "i128" }),
-      ];
-      return submitTx("place_bid", params);
-    },
-    [submitTx, address],
-  );
-
-  const claimWinning = useCallback(
-    async (auctionId: bigint): Promise<string> => {
-      const params = [
-        nativeToScVal(auctionId, { type: "u64" }),
-      ];
-      return submitTx("claim_winning", params);
-    },
-    [submitTx],
-  );
-
-  const reclaimUnsold = useCallback(
-    async (auctionId: bigint): Promise<string> => {
-      const params = [
-        nativeToScVal(auctionId, { type: "u64" }),
-      ];
-      return submitTx("reclaim_unsold", params);
-    },
-    [submitTx],
-  );
-
-  // ──────────────────────────────────────────────
-  //  READ METHODS
-  // ──────────────────────────────────────────────
-
-  const getAuctionDetails = useCallback(
-    async (
-      auctionId: bigint,
-      opts: { manageState?: boolean } = {},
-    ): Promise<AuctionDetails | null> => {
-      const manageState = opts.manageState ?? true;
-      const server = getServer();
-      const contract = getContract();
-      if (!server || !contract) return null;
-
-      if (manageState) {
-        setLoading(true);
-        setError(null);
-      }
-
-      try {
-        // FIX: Construct a local dummy account to bypass the Horizon 404 error entirely
-        const source = new Account(
-          "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", 
-          "0"
-        );
-
-        const tx = new TransactionBuilder(source, {
-          fee: BASE_FEE,
-          networkPassphrase: NETWORK.networkPassphrase,
-        })
-          .addOperation(
-            contract.call(
-              "get_auction",
-              nativeToScVal(auctionId, { type: "u64" }),
-            ),
-          )
-          .setTimeout(30)
-          .build();
-
-        const sim = await server.simulateTransaction(tx);
-
-        if ("error" in sim) {
-          const errMsg = String(sim.error ?? "");
-          // Detect contract NotFound (Error(Contract, #1)) — auction doesn't exist on-chain
-          const isNotFound = /Error\(Contract,\s*#1\)/i.test(errMsg);
-          if (isNotFound) {
-            // Clean up stale ID from localStorage registry
-            removeKnownAuctionId(auctionId);
-          }
-          if (manageState) {
-            setError(isNotFound ? `AUCTION #${auctionId} DOES NOT EXIST ON-CHAIN` : `Simulation error: ${errMsg}`);
-          }
-          return null;
-        }
-
-        if (!sim.result || !sim.result.retval) {
-          if (manageState) setError("Auction not found");
-          return null;
-        }
-
-        const raw = scValToNative(sim.result.retval) as Record<string, unknown>;
-
-        const details: AuctionDetails = {
-          id: BigInt(String(raw.id ?? auctionId.toString())),
-          creator: String(raw.creator ?? ""),
-          token: String(raw.token ?? ""),
-          token_id: BigInt(String(raw.token_id ?? "0")),
-          bidToken: String(raw.bid_token ?? ""),
-          startPrice: BigInt(String(raw.start_price ?? "0")),
-          highestBid: BigInt(String(raw.highest_bid ?? "0")),
-          highestBidder: String(raw.highest_bidder ?? ""),
-          startTime: Number(raw.start_time ?? 0),
-          endTime: Number(raw.end_time ?? 0),
-          ended: Boolean(raw.ended ?? false),
-          claimed: Boolean(raw.claimed ?? false),
-          isPrivate: Boolean(raw.is_private ?? false),
-          allowlist: Array.isArray(raw.allowlist)
-            ? raw.allowlist.map((addr: unknown) => String(addr))
-            : [],
-        };
-
-        setAuction(details);
-        return details;
-      } catch (err: unknown) {
-        const message =
-          err instanceof Error ? err.message : "Failed to fetch auction";
-        if (manageState) setError(message);
-        return null;
-      } finally {
-        if (manageState) setLoading(false);
-      }
-    },
-    [setAuction, setLoading, setError],
-  );
-
-  const fetchAllAuctions = useCallback(async (): Promise<AuctionDetails[]> => {
-    const ids = getKnownAuctionIds();
-    if (ids.length === 0) {
-      setAuctions([]);
-      return [];
-    }
+  const submitTx = useCallback(async (method: string, params: xdr.ScVal[]): Promise<string> => {
+    const server = getServer();
+    const contract = getAuctionContract();
+    if (!server || !contract || !address) throw new Error("Wallet not connected");
 
     setLoading(true);
     setError(null);
 
     try {
-      const results = await Promise.allSettled(
-        ids.map((id) => getAuctionDetails(id, { manageState: false })),
-      );
+      const source = await server.getAccount(address);
+      const tx = new TransactionBuilder(source, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK.networkPassphrase,
+      })
+        .addOperation(contract.call(method, ...params))
+        .setTimeout(30)
+        .build();
 
-      const auctions = results
-        .filter(
-          (r): r is PromiseFulfilledResult<AuctionDetails> =>
-            r.status === "fulfilled" && r.value !== null,
-        )
-        .map((r) => r.value);
+      const sim = await server.simulateTransaction(tx);
+      if ("error" in sim) throw new Error(`Simulation failed: ${sim.error}`);
 
-      setAuctions(auctions);
-      return auctions;
-    } catch (err: unknown) {
-      const message =
-        err instanceof Error ? err.message : "Failed to fetch auctions";
-      setError(message);
-      return [];
+      const preparedTx = assembleTransaction(tx, sim).build();
+      const signedXdr = await signTx(preparedTx.toXDR(), NETWORK.networkPassphrase);
+
+      let sendResult;
+      let retryCount = 0;
+      const maxRetries = 3;
+
+      while (retryCount < maxRetries) {
+        sendResult = await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase));
+        if (sendResult.status !== "TRY_AGAIN_LATER") break;
+        retryCount++;
+        await new Promise((resolve) => setTimeout(resolve, 2000));
+      }
+
+      if (!sendResult || sendResult.status === "ERROR") throw new Error("Network rejected transaction.");
+      if (sendResult.status !== "PENDING") throw new Error(`Status: ${sendResult.status}`);
+
+      const txResult = await server.pollTransaction(sendResult.hash!, { attempts: 30 });
+      if (txResult.status !== "SUCCESS") throw new Error("Transaction failed");
+
+      return txResult.txHash;
+    } catch (err: any) {
+      const rawMsg = err instanceof Error ? err.message : "Unknown error";
+      const decoded = parseContractError(rawMsg, CONTRACT_ADDRESS);
+      setError(decoded || rawMsg);
+      throw err;
     } finally {
       setLoading(false);
     }
-  }, [getAuctionDetails, setAuctions, setLoading, setError]);
+  }, [address, signTx, setLoading, setError]);
 
-  // ──────────────────────────────────────────────
-  //  TOKEN BALANCE QUERY
-  // ──────────────────────────────────────────────
+  // ── NFT Approval ────────────────────────────────────────────────────
+  const approveNft = useCallback(async (tokenAddress: string, tokenId: bigint): Promise<string> => {
+      const server = getServer();
+      if (!server || !address) throw new Error("Wallet not connected");
+      const nftContract = new Contract(tokenAddress);
+      const source = await server.getAccount(address);
+      const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
+        .addOperation(nftContract.call("approve", new Address(address).toScVal(), new Address(CONTRACT_ADDRESS).toScVal(), nativeToScVal(tokenId, { type: "i128" })))
+        .setTimeout(30).build();
+      const sim = await server.simulateTransaction(tx);
+      if ("error" in sim) throw new Error("Approve simulation failed");
+      const signedXdr = await signTx(assembleTransaction(tx, sim).build().toXDR(), NETWORK.networkPassphrase);
+      const sendResult = await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase));
+      const txResult = await server.pollTransaction(sendResult.hash!, { attempts: 30 });
+      return txResult.txHash;
+  }, [address, signTx]);
 
-  const getTokenBalance = useCallback(
-    async (tokenAddress: string, holderAddress: string): Promise<bigint | null> => {
+  // ── PURE BLOCKCHAIN-DRIVEN DISCOVERY ─────────────────────────────────
+  const fetchAllAuctions = useCallback(async () => {
+    const server = getServer();
+    const contract = getAuctionContract();
+    if (!server || !contract) return;
+
+    setLoading(true);
+    try {
+      const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+      const tx = new TransactionBuilder(dummySource, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
+        .addOperation(contract.call("get_next_id"))
+        .setTimeout(30)
+        .build();
+      
+      const sim = await server.simulateTransaction(tx);
+      const nextId = sim.result?.retval ? Number(scValToNative(sim.result.retval)) : 1;
+
+      const auctionPromises = [];
+      for (let i = 1; i < nextId; i++) {
+        auctionPromises.push(getAuctionDetails(BigInt(i), { manageState: false }));
+      }
+
+      const results = await Promise.all(auctionPromises);
+      const activeAuctions = results.filter((a): a is AuctionDetails => a !== null);
+      setAuctions(activeAuctions);
+    } catch (err) {
+      console.error("SYNC FAILED:", err);
+    } finally {
+      setLoading(false);
+    }
+  }, [setAuctions, setLoading]);
+
+  const getAuctionDetails = useCallback(async (auctionId: bigint, opts: { manageState?: boolean } = {}): Promise<AuctionDetails | null> => {
+    const manageState = opts.manageState ?? true;
+    const server = getServer();
+    const contract = getAuctionContract();
+    if (!server || !contract) return null;
+
+    if (manageState) {
+      setLoading(true);
+      setError(null);
+    }
+
+    try {
+      const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+      const tx = new TransactionBuilder(dummySource, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
+        .addOperation(contract.call("get_auction", nativeToScVal(auctionId, { type: "u64" })))
+        .setTimeout(30)
+        .build();
+
+      const sim = await server.simulateTransaction(tx);
+      if ("error" in sim || !sim.result?.retval) {
+        if (manageState) setError(`AUCTION #${auctionId} NOT FOUND`);
+        return null;
+      }
+
+      const raw = scValToNative(sim.result.retval) as Record<string, any>;
+      const details: AuctionDetails = {
+        id: BigInt(raw.id),
+        creator: String(raw.creator),
+        token: String(raw.token),
+        token_id: BigInt(raw.token_id),
+        bidToken: String(raw.bid_token),
+        startPrice: BigInt(raw.start_price),
+        highestBid: BigInt(raw.highest_bid),
+        highestBidder: String(raw.highest_bidder),
+        startTime: Number(raw.start_time),
+        endTime: Number(raw.end_time),
+        ended: Boolean(raw.ended),
+        claimed: Boolean(raw.claimed),
+        isPrivate: Boolean(raw.is_private),
+        allowlist: (raw.allowlist || []).map((a: any) => String(a)),
+      };
+
+      if (manageState) setAuction(details);
+      return details;
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : "Failed to fetch auction";
+      if (manageState) setError(message);
+      return null;
+    } finally {
+      if (manageState) setLoading(false);
+    }
+  }, [setAuction, setLoading, setError]);
+
+  // ── WRITE METHODS ────────────────────────────────────────────────────
+  const createAuction = useCallback(async (
+    creator: string, 
+    token: string, 
+    tokenId: bigint, 
+    bidToken: string, 
+    startPrice: bigint, 
+    startTime: number, 
+    endTime: number, 
+    isPrivate: boolean, 
+    allowlist: string[]
+  ): Promise<string> => {
+      // 1. Approve auction contract to transfer the NFT (harmless if already approved)
+      if (token === NFT_CONTRACT_ADDRESS) {
+        await approveNft(token, tokenId);
+      }
+
+      // 2. Submit Auction
+      const params = [
+        new Address(creator).toScVal(), 
+        new Address(token).toScVal(), 
+        nativeToScVal(tokenId, { type: "i128" }), 
+        new Address(bidToken).toScVal(), 
+        nativeToScVal(startPrice, { type: "i128" }), 
+        nativeToScVal(startTime, { type: "u64" }), 
+        nativeToScVal(endTime, { type: "u64" }), 
+        xdr.ScVal.scvBool(isPrivate), 
+        xdr.ScVal.scvVec(allowlist.map(addr => new Address(addr).toScVal()))
+      ];
+      return submitTx("create_auction", params);
+  }, [submitTx, approveNft]);
+
+  const placeBid = useCallback(async (auctionId: bigint, amount: bigint): Promise<string> => {
+    return submitTx("place_bid", [
+      new Address(address!).toScVal(),
+      nativeToScVal(auctionId, { type: "u64" }),
+      nativeToScVal(amount, { type: "i128" }),
+    ]);
+  }, [submitTx, address]);
+
+  const claimWinning = useCallback(async (auctionId: bigint): Promise<string> => {
+    return submitTx("claim_winning", [nativeToScVal(auctionId, { type: "u64" })]);
+  }, [submitTx]);
+
+  const reclaimUnsold = useCallback(async (auctionId: bigint): Promise<string> => {
+    return submitTx("reclaim_unsold", [nativeToScVal(auctionId, { type: "u64" })]);
+  }, [submitTx]);
+
+  const getTokenBalance = useCallback(async (tokenAddress: string, holderAddress: string): Promise<bigint | null> => {
       const server = getServer();
       if (!server) return null;
       try {
         const tokenContract = new Contract(tokenAddress);
-        const source = new Account(
-          "GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF",
-          "0",
-        );
-        const tx = new TransactionBuilder(source, {
-          fee: BASE_FEE,
-          networkPassphrase: NETWORK.networkPassphrase,
-        })
-          .addOperation(
-            tokenContract.call(
-              "balance",
-              new Address(holderAddress).toScVal(),
-            ),
-          )
+        const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+        const tx = new TransactionBuilder(dummySource, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
+          .addOperation(tokenContract.call("balance", new Address(holderAddress).toScVal()))
           .setTimeout(30)
           .build();
         const sim = await server.simulateTransaction(tx);
-        if ("error" in sim || !sim.result?.retval) return null;
-        return BigInt(String(scValToNative(sim.result.retval)));
-      } catch {
-        return null;
-      }
-    },
-    [],
-  );
+        return sim.result?.retval ? BigInt(String(scValToNative(sim.result.retval))) : null;
+      } catch { return null; }
+  }, []);
 
-  return {
-    initContract,
-    approveNft,
-    createAuction,
-    placeBid,
-    claimWinning,
-    reclaimUnsold,
-    getAuctionDetails,
-    fetchAllAuctions,
-    getTokenBalance,
-    addKnownAuctionId,
-    removeKnownAuctionId,
-    getKnownAuctionIds,
-  };
+  return { createAuction, fetchAllAuctions, getAuctionDetails, placeBid, claimWinning, reclaimUnsold, getTokenBalance };
 }

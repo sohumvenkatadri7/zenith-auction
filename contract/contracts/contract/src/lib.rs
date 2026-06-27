@@ -1,5 +1,4 @@
 #![no_std]
-// FEATURE: ALLOWLIST - Added `Vec` to the imports
 use soroban_sdk::{
     contract, contracterror, contractevent, contractimpl, contracttype, token, Address, Env, Vec,
 };
@@ -16,7 +15,7 @@ pub enum AuctionError {
     NotWinner = 6,
     NoBids = 7,
     HasBids = 8,
-    NotOnAllowlist = 9, // FEATURE: ALLOWLIST - New error for unauthorized bidders
+    NotOnAllowlist = 9,
 }
 
 #[contracttype]
@@ -34,8 +33,8 @@ pub struct Auction {
     pub end_time: u64,
     pub ended: bool,
     pub claimed: bool,
-    pub is_private: bool,            // FEATURE: ALLOWLIST - Toggle switch
-    pub allowlist: Vec<Address>,     // FEATURE: ALLOWLIST - The list of allowed wallets
+    pub is_private: bool,
+    pub allowlist: Vec<Address>,
 }
 
 #[contracttype]
@@ -44,14 +43,13 @@ pub enum DataKey {
     Auction(u64),
 }
 
-// --- MACRO-BASED EVENT STRUCTS ---
-
+// --- EVENTS ---
 #[contractevent]
 pub struct AuctionCreated {
     pub creator: Address,
     pub auction_id: u64,
     pub token_id: i128,
-    pub is_private: bool, // Helps your frontend know if it needs to display a "Private" badge
+    pub is_private: bool,
 }
 
 #[contractevent]
@@ -77,14 +75,15 @@ pub struct AuctionReclaimed {
     pub token_id: i128,
 }
 
-// ---------------------------------------
-
 #[contract]
 pub struct Contract;
 
 #[contractimpl]
 impl Contract {
     pub fn init(env: Env) {
+        if env.storage().instance().has(&DataKey::NextId) {
+            return;
+        }
         env.storage().instance().set(&DataKey::NextId, &1u64);
     }
 
@@ -97,12 +96,11 @@ impl Contract {
         start_price: i128,
         start_time: u64,
         end_time: u64,
-        is_private: bool,           // FEATURE: ALLOWLIST - Accept the toggle
-        allowlist: Vec<Address>,    // FEATURE: ALLOWLIST - Accept the array of addresses
+        is_private: bool,
+        allowlist: Vec<Address>,
     ) -> u64 {
         creator.require_auth();
 
-        // Lock the specific NFT ID into the contract via transfer_from
         token::Client::new(&env, &token).transfer_from(
             &env.current_contract_address(),
             &creator,
@@ -129,8 +127,8 @@ impl Contract {
             end_time,
             ended: false,
             claimed: false,
-            is_private, // FEATURE: ALLOWLIST - Save to struct
-            allowlist,  // FEATURE: ALLOWLIST - Save to struct
+            is_private,
+            allowlist,
         };
 
         env.storage().instance().set(&DataKey::Auction(id), &auction);
@@ -140,7 +138,7 @@ impl Contract {
             creator,
             auction_id: id,
             token_id,
-            is_private, // Emitted for the frontend
+            is_private,
         }
         .publish(&env);
         
@@ -161,33 +159,20 @@ impl Contract {
             .get(&DataKey::Auction(auction_id))
             .ok_or(AuctionError::NotFound)?;
 
-        // FEATURE: ALLOWLIST - The Security Gatekeeper
-        // If the auction is private, verify the bidder is in the array before allowing the bid
-        if auction.is_private {
-            if !auction.allowlist.contains(&bidder) {
-                return Err(AuctionError::NotOnAllowlist);
-            }
+        if auction.is_private && !auction.allowlist.contains(&bidder) {
+            return Err(AuctionError::NotOnAllowlist);
         }
 
         let now = env.ledger().timestamp();
-        if now < auction.start_time || now > auction.end_time {
-            return Err(AuctionError::NotActive);
-        }
-        if auction.ended || auction.claimed {
+        if now < auction.start_time || now > auction.end_time || auction.ended || auction.claimed {
             return Err(AuctionError::NotActive);
         }
 
-        let min_bid = if auction.highest_bid == 0 {
-            auction.start_price
-        } else {
-            auction.highest_bid + 1
-        };
-        
+        let min_bid = if auction.highest_bid == 0 { auction.start_price } else { auction.highest_bid + 1 };
         if amount < min_bid {
             return Err(AuctionError::BidTooLow);
         }
 
-        // Refund the previous highest bidder automatically
         if auction.highest_bid > 0 {
             token::Client::new(&env, &auction.bid_token).transfer(
                 &env.current_contract_address(),
@@ -196,7 +181,6 @@ impl Contract {
             );
         }
 
-        // Transfer the new bid into the contract
         token::Client::new(&env, &auction.bid_token).transfer(
             &bidder,
             &env.current_contract_address(),
@@ -208,50 +192,32 @@ impl Contract {
         
         env.storage().instance().set(&DataKey::Auction(auction_id), &auction);
         
-        BidPlaced {
-            auction_id,
-            bidder,
-            amount,
-        }
-        .publish(&env);
-        
+        BidPlaced { auction_id, bidder, amount }.publish(&env);
         Ok(())
     }
 
-    pub fn claim_winning(
-        env: Env,
-        auction_id: u64,
-    ) -> Result<(), AuctionError> {
+    pub fn claim_winning(env: Env, auction_id: u64) -> Result<(), AuctionError> {
         let mut auction: Auction = env
             .storage()
             .instance()
             .get(&DataKey::Auction(auction_id))
             .ok_or(AuctionError::NotFound)?;
 
-        // Only the winner may claim their prize
         auction.highest_bidder.require_auth();
 
-        if env.ledger().timestamp() <= auction.end_time {
+        if env.ledger().timestamp() <= auction.end_time || auction.claimed || auction.highest_bid == 0 {
             return Err(AuctionError::NotEnded);
-        }
-        if auction.claimed {
-            return Err(AuctionError::AlreadyClaimed);
-        }
-        if auction.highest_bid == 0 {
-            return Err(AuctionError::NoBids);
         }
 
         auction.ended = true;
         auction.claimed = true;
 
-        // Route the SPECIFIC NFT to the winner
         token::Client::new(&env, &auction.token).transfer(
             &env.current_contract_address(),
             &auction.highest_bidder,
             &auction.token_id, 
         );
         
-        // Route the money to the creator
         token::Client::new(&env, &auction.bid_token).transfer(
             &env.current_contract_address(),
             &auction.creator,
@@ -262,43 +228,31 @@ impl Contract {
         
         AuctionClaimed {
             auction_id,
-            winner: auction.highest_bidder.clone(),
-            creator: auction.creator.clone(),
+            winner: auction.highest_bidder,
+            creator: auction.creator,
             amount: auction.highest_bid,
             token_id: auction.token_id,
-        }
-        .publish(&env);
+        }.publish(&env);
         
         Ok(())
     }
 
-    pub fn reclaim_unsold(
-        env: Env,
-        auction_id: u64,
-    ) -> Result<(), AuctionError> {
+    pub fn reclaim_unsold(env: Env, auction_id: u64) -> Result<(), AuctionError> {
         let mut auction: Auction = env
             .storage()
             .instance()
             .get(&DataKey::Auction(auction_id))
             .ok_or(AuctionError::NotFound)?;
 
-        // Only the creator may reclaim their unsold item
         auction.creator.require_auth();
 
-        if env.ledger().timestamp() <= auction.end_time {
+        if env.ledger().timestamp() <= auction.end_time || auction.claimed || auction.highest_bid > 0 {
             return Err(AuctionError::NotEnded);
-        }
-        if auction.claimed {
-            return Err(AuctionError::AlreadyClaimed);
-        }
-        if auction.highest_bid > 0 {
-            return Err(AuctionError::HasBids);
         }
 
         auction.ended = true;
         auction.claimed = true;
 
-        // Return the SPECIFIC NFT back to the creator
         token::Client::new(&env, &auction.token).transfer(
             &env.current_contract_address(),
             &auction.creator,
@@ -309,10 +263,9 @@ impl Contract {
         
         AuctionReclaimed {
             auction_id,
-            creator: auction.creator.clone(),
+            creator: auction.creator,
             token_id: auction.token_id,
-        }
-        .publish(&env);
+        }.publish(&env);
         
         Ok(())
     }
@@ -322,5 +275,10 @@ impl Contract {
             .instance()
             .get(&DataKey::Auction(auction_id))
             .ok_or(AuctionError::NotFound)
+    }
+
+    // FEATURE: BULK FETCH HELPER
+    pub fn get_next_id(env: Env) -> u64 {
+        env.storage().instance().get(&DataKey::NextId).unwrap_or(1u64)
     }
 }
