@@ -19,41 +19,27 @@ export interface AuctionDetails {
   allowlist: string[];
 }
 
-export interface BidEvent {
-  auctionId: string;
-  bidder: string;
-  amount: string;
-  timestamp: number;
-}
-
 interface AuctionState {
   /** Currently viewed auction details */
   auction: AuctionDetails | null;
   /** List of all known auctions (for home page) */
   auctions: AuctionDetails[];
-  bidHistory: BidEvent[];
   isLoading: boolean;
   error: string | null;
-  lastPolledLedger: number;
 
   setAuction: (details: AuctionDetails) => void;
   setAuctions: (auctions: AuctionDetails[]) => void;
   updateAuction: (details: AuctionDetails) => void;
-  setBidHistory: (events: BidEvent[]) => void;
-  appendBid: (event: BidEvent) => void;
   setLoading: (loading: boolean) => void;
   setError: (error: string | null) => void;
-  setLastPolledLedger: (ledger: number) => void;
   reset: () => void;
 }
 
 const initialState = {
   auction: null,
   auctions: [],
-  bidHistory: [],
   isLoading: false,
   error: null,
-  lastPolledLedger: 0,
 };
 
 export const useAuctionStore = create<AuctionState>((set) => ({
@@ -68,11 +54,7 @@ export const useAuctionStore = create<AuctionState>((set) => ({
       ),
       auction: state.auction?.id === details.id ? details : state.auction,
     })),
-  setBidHistory: (events) => set({ bidHistory: events }),
-  appendBid: (event) =>
-    set((state) => ({ bidHistory: [...state.bidHistory, event] })),
   setLoading: (isLoading) => set({ isLoading }),
   setError: (error) => set({ error }),
-  setLastPolledLedger: (lastPolledLedger) => set({ lastPolledLedger }),
   reset: () => set(initialState),
 }));

@@ -21,6 +21,7 @@
 
 ## Table of Contents
 
+- [Level 2 Completion Checklist](#-level-2-completion-checklist)
 - [Architecture Overview](#-architecture-overview)
 - [Screenshots & Preview](#-screenshots--preview)
 - [Core Engineering Architecture](#-core-engineering-architecture)
@@ -32,6 +33,18 @@
 - [Setup & Local Development](#-setup--local-development)
 - [Project Structure](#-project-structure)
 - [License](#-license)
+
+---
+
+## Level 2 Completion Checklist
+
+| Requirement | Status | Details |
+|---|---|---|
+| **3 Error Types Handled** | ✅ | `Simulation failed`, `Transaction failed`, `Wallet not connected` + contract-level `NotFound`, `NotActive`, `BidTooLow`, `NotOnAllowlist`, `AlreadyClaimed`, `NoBids`, `HasBids`, `NotEnded`, `NotWinner` (9 on-chain errors) |
+| **Contract Deployed on Testnet** | ✅ | Auction Protocol: `CB3MSS4J3YZCJXKP67KTUN2SR6LPPK3XZCJUSTCZ7BFSMFHBMCMY7FTY` · NFT Minting: `CDVMGOJB2OUCJQXUKVCBMOXPQXYPTARRP4BDPZFDBIGTLGRLIIA5PB4P` |
+| **Contract Called from Frontend** | ✅ | `useAuction` hook builds, simulates, signs, and submits Soroban transactions for `create_auction`, `place_bid`, `claim_winning`, `reclaim_unsold` |
+| **Transaction Status Visible** | ✅ | Real-time tx status (idle → submitting → error), spinner during signing, error messages displayed, post-claim diagnostics with TX hash and token balance |
+| **Minimum 2+ Meaningful Commits** | ✅ | See git log — core contract, frontend scaffolding, and bid tracking features committed separately |
 
 ---
 
@@ -125,7 +138,7 @@ graph TB
   <img src="screenshots/auction-room.png" alt="Auction room with live bid feed and countdown" width="800" />
 </p>
 
-*Full auction room with IPFS-resolved NFT metadata, live bid history feed, countdown with urgency animations, and claim/reclaim settlement actions.*
+*Full auction room with IPFS-resolved NFT metadata, bid activity tracker, countdown with urgency animations, and claim/reclaim settlement actions.*
 
 ### NFT Minting — IPFS Upload Flow
 
@@ -335,24 +348,9 @@ await submitTx("create_auction", [
 ]);
 ```
 
-### Real-Time Event Polling & Live Bid Feed
+### Bid Activity Tracking
 
-The frontend polls Soroban RPC for `BidPlaced` events every 8 seconds, maintaining a live bid history feed with auto-scroll, urgency animations, and color-coded countdown timers.
-
-```typescript
-// Event polling — listens for BidPlaced events on the auction contract
-const response = await server.getEvents({
-  startLedger: lastPolledLedgerRef.current,
-  filters: [{
-    type: "contract",
-    contractIds: [CONTRACT_ADDRESS],
-    topics: [
-      [nativeToScVal("bid_placed", { type: "symbol" }).toXDR("base64")],
-    ],
-  }],
-  limit: 100,
-});
-```
+The frontend tracks bid state changes through periodic on-chain RPC polling (every 12s), displaying a real-time bid activity log with change detection, bidder identification, and relative timestamps.
 
 ### Automatic Underbidder Refunds
 
@@ -514,7 +512,7 @@ Returns:      Result<Auction, AuctionError>
 | Styling | Tailwind CSS 4 | Brutalist dark UI system |
 | State | Zustand 5 | Client-side auction + wallet state management |
 | Wallet | Freighter + Stellar Wallets Kit | Multi-wallet connection + XDR signing |
-| Blockchain | Stellar SDK 16 | Soroban RPC, transaction building, event polling |
+| Blockchain | Stellar SDK 16 | Soroban RPC, transaction building, on-chain state polling |
 | Storage | IPFS via Pinata | Decentralized NFT metadata + asset hosting |
 | Icons | Lucide React | UI iconography |
 
@@ -526,7 +524,7 @@ Returns:      Result<Auction, AuctionError>
 | `/create` | Auction creation form — auto-fillable from NFT gallery |
 | `/mint` | NFT minting interface — upload asset to IPFS, mint on-chain |
 | `/nfts` | On-chain NFT gallery — scans token IDs 1–50, resolves IPFS metadata |
-| `/auction/[id]` | Auction room — live bid feed, countdown, bid/claim/reclaim actions |
+| `/auction/[id]` | Auction room — bid activity tracker, countdown, bid/claim/reclaim actions |
 
 ### State Management
 
@@ -538,10 +536,9 @@ Returns:      Result<Auction, AuctionError>
 │  walletStore              auctionStore            │
 │  ├── address: string      ├── auction: Details    │
 │  ├── isConnecting         ├── auctions: Details[] │
-│  ├── connect()            ├── bidHistory: Event[] │
-│  ├── disconnect()         ├── isLoading           │
-│  └── signTx()             ├── lastPolledLedger    │
-│                           └── setAuction()        │
+│  ├── connect()            ├── isLoading           │
+│  ├── disconnect()         ├── error               │
+│  └── signTx()             └── setAuction()        │
 │                                                   │
 │  nftStore                                        │
 │  ├── nfts: LocalNft[]                            │
@@ -553,7 +550,7 @@ Returns:      Result<Auction, AuctionError>
 
 | Hook | Purpose |
 |---|---|
-| `useAuction` | Core contract interaction — `createAuction`, `placeBid`, `claimWinning`, `reclaimUnsold`, `getAuctionDetails`, `fetchAllAuctions`, `pollBidEvents`, `getTokenBalance` |
+| `useAuction` | Core contract interaction — `createAuction`, `placeBid`, `claimWinning`, `reclaimUnsold`, `getAuctionDetails`, `fetchAllAuctions`, `getTokenBalance` |
 | `useNftMint` | NFT minting pipeline — handles IPFS upload, contract initialization, Soroban mint transaction, phase state machine (`idle` → `uploading` → `initializing` → `minting` → `confirming` → `success`) |
 | `useNftGallery` | On-chain gallery scanner — scans token IDs 1–50, filters by connected wallet ownership, resolves IPFS metadata for each owned token |
 

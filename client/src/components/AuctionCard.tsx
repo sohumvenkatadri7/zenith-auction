@@ -2,7 +2,6 @@
 
 import Link from "next/link";
 import { type AuctionDetails } from "@/store/auctionStore";
-import { useAuctionStore } from "@/store/auctionStore";
 import { formatAmount, formatDuration } from "@/lib/format";
 import { useEffect, useState } from "react";
 
@@ -32,13 +31,10 @@ export default function AuctionCard({ auction }: Props) {
   const [timeLeft, setTimeLeft] = useState("");
   const [urgency, setUrgency] = useState<"normal" | "warning" | "critical" | "ended">("normal");
   const [progress, setProgress] = useState(0);
-  const { bidHistory } = useAuctionStore();
-
   const isEnded = Math.floor(Date.now() / 1000) >= auction.endTime;
   const isStarted = Math.floor(Date.now() / 1000) >= auction.startTime;
   const hasBids = auction.highestBid > 0n;
-  const currentBids = bidHistory.filter(b => b.auctionId === auction.id.toString());
-  const bidCount = currentBids.length > 0 ? currentBids.length : hasBids ? 1 : 0;
+  const bidCount = hasBids ? 1 : 0;
   const truncate = (str: string) => `${str.slice(0, 4)}...${str.slice(-4)}`;
 
   useEffect(() => {

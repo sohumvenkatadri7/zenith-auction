@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useRef } from "react";
+import { useCallback } from "react";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore, type AuctionDetails } from "@/store/auctionStore";
 import {
@@ -86,13 +86,9 @@ export function useAuction() {
   const {
     setAuction,
     setAuctions,
-    appendBid,
     setLoading,
     setError,
-    setLastPolledLedger,
   } = useAuctionStore();
-
-  const lastPolledLedgerRef = useRef(0);
 
   // ──────────────────────────────────────────────
   //  CORE: build, simulate, sign, submit
@@ -471,65 +467,6 @@ export function useAuction() {
     [],
   );
 
-  // ──────────────────────────────────────────────
-  //  EVENT POLLING
-  // ──────────────────────────────────────────────
-
-  const pollBidEvents = useCallback(
-    async (auctionId: string): Promise<void> => {
-      const server = getServer();
-      if (!server) return;
-
-      try {
-        if (lastPolledLedgerRef.current === 0) {
-          const latest = await server.getLatestLedger();
-          lastPolledLedgerRef.current = Math.max(1, latest.sequence - 10);
-          setLastPolledLedger(lastPolledLedgerRef.current);
-          return;
-        }
-
-        const response = await server.getEvents({
-          startLedger: lastPolledLedgerRef.current,
-          filters: [
-            {
-              type: "contract",
-              contractIds: [CONTRACT_ADDRESS],
-              topics: [
-                // Fixed wildcard bug: Only pass the exact symbol
-                [
-                  nativeToScVal("bid_placed", { type: "symbol" }).toXDR(
-                    "base64",
-                  ),
-                ],
-              ],
-            },
-          ],
-          limit: 100,
-        });
-
-        if (response.events.length > 0) {
-          for (const evt of response.events) {
-            const value = scValToNative(evt.value) as Record<string, unknown>;
-            appendBid({
-              auctionId: String(value.auction_id ?? auctionId),
-              bidder: String(value.bidder ?? ""),
-              amount: String(value.amount ?? "0"),
-              timestamp: Date.now(),
-            });
-          }
-        }
-
-        if (response.cursor) {
-          lastPolledLedgerRef.current = Number(response.cursor);
-          setLastPolledLedger(lastPolledLedgerRef.current);
-        }
-      } catch {
-        // Polling errors are non-critical
-      }
-    },
-    [appendBid, setLastPolledLedger],
-  );
-
   return {
     initContract,
     approveNft,
@@ -539,7 +476,6 @@ export function useAuction() {
     reclaimUnsold,
     getAuctionDetails,
     fetchAllAuctions,
-    pollBidEvents,
     getTokenBalance,
     addKnownAuctionId,
     removeKnownAuctionId,

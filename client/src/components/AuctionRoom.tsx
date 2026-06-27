@@ -58,28 +58,91 @@ function ProgressBar({ percent, urgency }: { percent: number; urgency: string })
   );
 }
 
-function BidHistoryFeed({ bids }: { bids: any[] }) {
-  const scrollRef = useRef<HTMLDivElement>(null);
+interface BidSnapshot {
+  bidder: string;
+  amount: string;
+  timestamp: number;
+}
+
+function BidActivityTracker({ auction }: { auction: { highestBid: bigint; highestBidder: string; startTime: number; endTime: number } }) {
+  const [snapshots, setSnapshots] = useState<BidSnapshot[]>([]);
+  const prevBidRef = useRef(auction.highestBid.toString());
+  const initializedRef = useRef(false);
   const [, setTick] = useState(0);
+
+  // Auto-refresh relative timestamps every 10s
   useEffect(() => { const iv = setInterval(() => setTick(t => t + 1), 10000); return () => clearInterval(iv); }, []);
-  useEffect(() => { if (scrollRef.current) scrollRef.current.scrollTop = scrollRef.current.scrollHeight; }, [bids.length]);
-  if (bids.length === 0) {
-    return (<div className="flex h-32 items-center justify-center border-2 border-dashed border-[#1e1e2e]"><p className="font-mono text-[10px] uppercase tracking-widest text-[#44445a]">AWAITING FIRST BID...</p></div>);
-  }
+
+  // Single effect: initialize on first render if bid exists, then track changes
+  useEffect(() => {
+    const cur = auction.highestBid.toString();
+    if (!initializedRef.current && auction.highestBid > 0n) {
+      // First render with an existing bid — initialize snapshot
+      initializedRef.current = true;
+      prevBidRef.current = cur;
+      setSnapshots([{ bidder: auction.highestBidder, amount: cur, timestamp: Date.now() }]);
+    } else if (initializedRef.current && cur !== prevBidRef.current && auction.highestBid > 0n) {
+      // Subsequent renders with a changed bid — append new snapshot
+      prevBidRef.current = cur;
+      setSnapshots(prev => [
+        { bidder: auction.highestBidder, amount: cur, timestamp: Date.now() },
+        ...prev,
+      ].slice(0, 20));
+    } else {
+      prevBidRef.current = cur;
+    }
+  }, [auction.highestBid, auction.highestBidder]);
+
+  const totalBidChanges = snapshots.length;
+  const isEnded = Math.floor(Date.now() / 1000) >= auction.endTime;
+
   return (
-    <div ref={scrollRef} className="flex h-48 flex-col gap-1 overflow-y-auto pr-1">
-      {[...bids].reverse().map((bid, i) => (
-        <div key={bid.timestamp + "-" + i} className={"flex items-center justify-between border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 font-mono text-xs " + (i === 0 ? "animate-slide-in-right border-[#3b82f6]/40 bg-[#3b82f6]/5" : "")}>
-          <div className="flex items-center gap-2">
-            <span className={"h-1.5 w-1.5 rounded-full " + (i === 0 ? "bg-[#3b82f6]" : "bg-[#1e1e2e]")} />
-            <span className="text-[#6b6b80]">{truncateAddr(bid.bidder)}</span>
-          </div>
-          <div className="flex items-center gap-3">
-            <span className="text-[#3b82f6]">{formatAmount(BigInt(bid.amount))}</span>
-            <span className="text-[10px] text-[#44445a]">{relativeTime(bid.timestamp)}</span>
-          </div>
+    <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-6">
+      <div className="mb-4 flex items-center justify-between">
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">// BID ACTIVITY</h2>
+        <div className="flex items-center gap-1.5">
+          {!isEnded && <LiveDot />}
+          <span className="font-mono text-[10px] text-[#44445a]">{totalBidChanges} CHANGE{totalBidChanges !== 1 ? "S" : ""} DETECTED</span>
         </div>
-      ))}
+      </div>
+
+      {/* Status Summary */}
+      <div className="mb-4 grid grid-cols-3 gap-3">
+        <div className="border border-[#1e1e2e] bg-[#0a0a0f] p-3 text-center">
+          <p className="text-[9px] font-bold uppercase text-[#44445a]">TOTAL CHANGES</p>
+          <p className="mt-1 font-mono text-lg font-bold text-[#3b82f6]">{totalBidChanges}</p>
+        </div>
+        <div className="border border-[#1e1e2e] bg-[#0a0a0f] p-3 text-center">
+          <p className="text-[9px] font-bold uppercase text-[#44445a]">LATEST BIDDER</p>
+          <p className="mt-1 font-mono text-[10px] text-[#e8e8f0]">{truncateAddr(auction.highestBidder)}</p>
+        </div>
+        <div className="border border-[#1e1e2e] bg-[#0a0a0f] p-3 text-center">
+          <p className="text-[9px] font-bold uppercase text-[#44445a]">STATUS</p>
+          <p className={`mt-1 font-mono text-[10px] font-bold ${isEnded ? 'text-[#6b6b80]' : 'text-[#22c55e]'}`}>{isEnded ? 'ENDED' : 'ACTIVE'}</p>
+        </div>
+      </div>
+
+      {/* Activity Log */}
+      {snapshots.length === 0 ? (
+        <div className="flex h-32 items-center justify-center border-2 border-dashed border-[#1e1e2e]">
+          <p className="font-mono text-[10px] uppercase tracking-widest text-[#44445a]">NO BID CHANGES YET — MONITORING...</p>
+        </div>
+      ) : (
+        <div className="flex h-48 flex-col gap-1 overflow-y-auto pr-1">
+          {snapshots.map((snap, i) => (
+            <div key={snap.timestamp + "-" + i} className={"flex items-center justify-between border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 font-mono text-xs " + (i === 0 ? "border-[#3b82f6]/40 bg-[#3b82f6]/5" : "")}>
+              <div className="flex items-center gap-2">
+                <span className={"h-1.5 w-1.5 rounded-full " + (i === 0 ? "bg-[#22c55e]" : "bg-[#1e1e2e]")} />
+                <span className="text-[#6b6b80]">{truncateAddr(snap.bidder)}</span>
+              </div>
+              <div className="flex items-center gap-3">
+                <span className="text-[#3b82f6]">{formatAmount(BigInt(snap.amount))}</span>
+                <span className="text-[10px] text-[#44445a]">{relativeTime(snap.timestamp)}</span>
+              </div>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -90,8 +153,8 @@ function StatBox({ label, value, color }: { label: string; value: string; color?
 
 export default function AuctionRoom({ auctionId }: Props) {
   const { address } = useWalletStore();
-  const { auction, isLoading, error, bidHistory } = useAuctionStore();
-  const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold, pollBidEvents, getTokenBalance } = useAuction();
+  const { auction, isLoading, error } = useAuctionStore();
+  const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold, getTokenBalance } = useAuction();
 
   // Claim diagnostics
   const [claimResult, setClaimResult] = useState<{ txHash: string; tokenAddr: string; wonBalance: string | null } | null>(null);
@@ -140,14 +203,7 @@ export default function AuctionRoom({ auctionId }: Props) {
     return () => clearInterval(iv);
   }, [auction?.endTime, refreshAuction]);
 
-  // Real-time event polling every 8s
-  useEffect(() => {
-    if (!auction) return;
-    if (Math.floor(Date.now() / 1000) >= auction.endTime) return;
-    pollBidEvents(auctionId.toString());
-    const iv = setInterval(() => pollBidEvents(auctionId.toString()), 8000);
-    return () => clearInterval(iv);
-  }, [auction?.endTime, auctionId, pollBidEvents]);
+
 
   // Detect new bids -> flash + pop animation
   useEffect(() => {
@@ -181,8 +237,7 @@ export default function AuctionRoom({ auctionId }: Props) {
     return () => clearInterval(iv);
   }, [auction]);
 
-  // Filter bids for this auction only
-  const currentBids = bidHistory.filter(b => b.auctionId === auctionId.toString());
+
 
   const handleBid = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -376,21 +431,12 @@ export default function AuctionRoom({ auctionId }: Props) {
             <div className="mt-6 grid grid-cols-3 gap-4 border-t-2 border-dashed border-[#1e1e2e] pt-4">
               <StatBox label="CREATOR" value={truncateAddr(auction.creator)} />
               <StatBox label="START PRICE" value={formatAmount(auction.startPrice)} color="text-[#6b6b80]" />
-              <StatBox label="BIDS" value={currentBids.length > 0 ? String(currentBids.length) : hasBids ? "1+" : "0"} color={hasBids ? "text-[#3b82f6]" : "text-[#6b6b80]"} />
+              <StatBox label="BIDS" value={hasBids ? "1+" : "0"} color={hasBids ? "text-[#3b82f6]" : "text-[#6b6b80]"} />
             </div>
           </div>
 
-          {/* Live Bid Feed */}
-          <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">// LIVE BID FEED</h2>
-              <div className="flex items-center gap-1.5">
-                {!isEnded && <LiveDot />}
-                <span className="font-mono text-[10px] text-[#44445a]">{currentBids.length} EVENT{currentBids.length !== 1 ? "S" : ""}</span>
-              </div>
-            </div>
-            <BidHistoryFeed bids={currentBids} />
-          </div>
+          {/* Bid Activity Tracker */}
+          <BidActivityTracker auction={auction} />
         </div>
 
         {/* Right: Actions + Details */}

@@ -64,17 +64,36 @@ export const useWalletStore = create<WalletState>((set) => ({
   },
 
   signAndSend: async (tx: any) => {
+    const TESTNET = "Test SDF Network ; September 2015";
     try {
-      const { signTransaction, submitTransaction } = await import("@stellar/freighter-api");
-      const result = await signTransaction(tx.toXDR(), { networkPassphrase: "Test SDF Network ; September 2015" });
-      if (result.error) {
-        throw new Error(result.error.message || "Signing failed");
+      // Step 1: Sign with Freighter
+      const { signTransaction } = await import("@stellar/freighter-api");
+      const signResult = await signTransaction(tx.toXDR(), { networkPassphrase: TESTNET });
+
+      if (signResult.error) {
+        const msg = typeof signResult.error === "string"
+          ? signResult.error
+          : (signResult.error.message || "Signing failed");
+        if (/rejected|cancelled|canceled|denied/i.test(msg)) {
+          throw new Error("Wallet signing was cancelled.");
+        }
+        throw new Error(msg);
       }
-      const sendResult = await submitTransaction(result.signedTxXdr);
+
+      // Step 2: Reconstruct the signed transaction from XDR
+      const { rpc, TransactionBuilder } = await import("@stellar/stellar-sdk");
+      const signedTx = TransactionBuilder.fromXDR(signResult.signedTxXdr, TESTNET);
+
+      // Step 3: Broadcast via Soroban RPC
+      const server = new rpc.Server("https://soroban-testnet.stellar.org");
+      const sendResult = await server.sendTransaction(signedTx);
+
       return sendResult;
     } catch (err) {
-      console.error("Wallet signing failed:", err);
-      return null;
+      if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
+        console.error("signAndSend failed:", err);
+      }
+      throw err;
     }
   },
 }));
