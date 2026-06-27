@@ -3,7 +3,7 @@
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
 import { useWalletStore } from "@/store/walletStore";
-import { useAuctionStore } from "@/store/auctionStore";
+import { useAuctionStore, type AuctionDetails } from "@/store/auctionStore";
 import { useAuction } from "@/hooks/useAuction";
 import { formatAmount, formatDuration } from "@/lib/format";
 import { CONTRACT_ADDRESS } from "@/lib/constants";
@@ -153,8 +153,12 @@ function StatBox({ label, value, color }: { label: string; value: string; color?
 
 export default function AuctionRoom({ auctionId }: Props) {
   const { address } = useWalletStore();
-  const { auction, isLoading, error } = useAuctionStore();
+  const { isLoading, error } = useAuctionStore();
   const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold, getTokenBalance } = useAuction();
+
+  // Use local state so each auction page is isolated (prevents cross-contamination)
+  const [auction, setAuctionLocal] = useState<AuctionDetails | null>(null);
+  const [localLoading, setLocalLoading] = useState(true);
 
   // Claim diagnostics
   const [claimResult, setClaimResult] = useState<{ txHash: string; tokenAddr: string; wonBalance: string | null } | null>(null);
@@ -176,12 +180,21 @@ export default function AuctionRoom({ auctionId }: Props) {
   const [nftImgError, setNftImgError] = useState(false);
 
   const refreshAuction = useCallback(async () => {
-    const fresh = await getAuctionDetails(auctionId);
-    if (fresh) setLastSync(new Date());
+    const fresh = await getAuctionDetails(auctionId, { manageState: false });
+    if (fresh) {
+      setAuctionLocal(fresh);
+      setLastSync(new Date());
+    }
+    setLocalLoading(false);
     return fresh;
   }, [auctionId, getAuctionDetails]);
 
-  useEffect(() => { refreshAuction(); }, [refreshAuction]);
+  // Fetch auction on mount and when auctionId changes
+  useEffect(() => {
+    setAuctionLocal(null);
+    setLocalLoading(true);
+    refreshAuction();
+  }, [refreshAuction]);
 
   // Fetch NFT metadata from IPFS when auction loads
   useEffect(() => {
@@ -310,7 +323,7 @@ export default function AuctionRoom({ auctionId }: Props) {
     }
   };
 
-  if (isLoading && !auction) {
+  if ((isLoading || localLoading) && !auction) {
     return (<main className="flex flex-1 items-center justify-center p-10"><div className="flex items-center gap-3"><span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[#3b82f6]" /><span className="font-mono text-xs font-bold uppercase tracking-widest text-[#6b6b80]">SYNCING WITH LEDGER...</span></div></main>);
   }
 
