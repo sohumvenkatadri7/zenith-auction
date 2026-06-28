@@ -11,7 +11,7 @@ jobs:
     runs-on: ubuntu-latest
     defaults:
       run:
-        working-directory: ./client # 👈 Directs all bash commands into the client directory
+        working-directory: ./client 
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -19,9 +19,9 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
-          cache-dependency-path: ./client/package-lock.json # 👈 Points to where the lockfile lives
+          cache-dependency-path: ./client/package-lock.json 
 
       - name: Install dependencies
         run: npm ci
@@ -42,7 +42,7 @@ jobs:
       - name: Setup Node.js
         uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '24'
           cache: 'npm'
           cache-dependency-path: ./client/package-lock.json
 
