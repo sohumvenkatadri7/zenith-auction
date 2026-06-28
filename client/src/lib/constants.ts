@@ -17,10 +17,5 @@ export const DEFAULT_BID_TOKEN = "CDLZFC3SYJYDZT7K67VZ75HPJVIEUVNIXF47ZG2FB2RMQQ
 
 export const STELLAR_EXPIRATION_MARGIN = 300; // seconds added to TimeBounds
 
-/**
- * Known auction IDs stored locally.
- * The Soroban contract doesn't support iterating over stored keys,
- * so the frontend keeps a small registry of IDs to query.
- * In a production app this would be an indexer or off-chain DB.
- */
+
 export const AUCTION_IDS_KEY = "zenith_known_auction_ids";
