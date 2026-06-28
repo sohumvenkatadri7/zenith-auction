@@ -151,9 +151,24 @@ function StatBox({ label, value, color }: { label: string; value: string; color?
   return (<div className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">{label}</span><span className={"font-mono text-sm font-bold " + (color || "text-[#e8e8f0]")}>{value}</span></div>);
 }
 
+/** Detect wallet rejection / user cancellation errors */
+function isWalletRejection(err: unknown): boolean {
+  const msg = err instanceof Error ? err.message : String(err);
+  return /cancel|reject|denied|dismissed/i.test(msg);
+}
+
+/** Map a caught error to a display-friendly message and type */
+function classifyError(err: unknown): { message: string; type: "error" | "warning" } {
+  if (isWalletRejection(err)) {
+    return { message: "TRANSACTION REJECTED — NO CHANGES WERE MADE", type: "warning" };
+  }
+  const msg = err instanceof Error ? err.message : "UNKNOWN ERROR";
+  return { message: msg.toUpperCase(), type: "error" };
+}
+
 export default function AuctionRoom({ auctionId }: Props) {
-  const { address } = useWalletStore();
-  const { isLoading, error } = useAuctionStore();
+  const { address, triggerBalanceRefresh } = useWalletStore();
+  const { isLoading, error, setError: clearGlobalError } = useAuctionStore();
   const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold, getTokenBalance } = useAuction();
 
   // Use local state so each auction page is isolated (prevents cross-contamination)
@@ -166,6 +181,7 @@ export default function AuctionRoom({ auctionId }: Props) {
   const [bidAmount, setBidAmount] = useState("");
   const [txStatus, setTxStatus] = useState<"idle" | "submitting" | "error">("idle");
   const [txMessage, setTxMessage] = useState("");
+  const [txMessageType, setTxMessageType] = useState<"error" | "warning">("error");
   const [timeLeft, setTimeLeft] = useState("");
   const [urgency, setUrgency] = useState<"normal" | "warning" | "critical" | "ended">("normal");
   const [progress, setProgress] = useState(0);
@@ -252,27 +268,47 @@ export default function AuctionRoom({ auctionId }: Props) {
 
 
 
+  // Compute minimum bid for client-side validation (independent of later derived vars)
+  const increment = auction ? (auction.minBidIncrement > 0n ? auction.minBidIncrement : 1n) : 1n;
+  const hasBids = auction ? auction.highestBid > 0n : false;
+  const minBidBigInt = !auction ? 0n : hasBids ? auction.highestBid + increment : auction.startPrice + 1n;
+  const parsedBidNum = bidAmount.trim() ? Number(bidAmount) : NaN;
+  const parsedBidBigInt = isNaN(parsedBidNum) ? 0n : BigInt(Math.round(parsedBidNum * 10 ** 7));
+  const isBidBelowMinimum = isNaN(parsedBidNum) || parsedBidBigInt < minBidBigInt;
+
   const handleBid = async (e: React.FormEvent) => {
     e.preventDefault();
+    setTxMessageType("error");
     if (!address) return setTxMessage("CONNECT WALLET FIRST");
-    const bidBigInt = BigInt(Math.round(Number(bidAmount) * 10 ** 7));
+    if (isBidBelowMinimum) {
+      setTxStatus("error");
+      setTxMessage("BID MUST BE AT LEAST " + formatAmount(minBidBigInt));
+      return;
+    }
+    const bidBigInt = BigInt(Math.round(parsedBidNum * 10 ** 7));
     setTxStatus("submitting");
     setTxMessage("");
     try {
       await placeBid(auctionId, bidBigInt);
-      await new Promise(r => setTimeout(r, 2000));
+      // 3-second delay for ledger settlement, then refetch auction + trigger balance refresh in Navbar
+      await new Promise(r => setTimeout(r, 3000));
       await refreshAuction();
+      triggerBalanceRefresh();
       setTxStatus("idle");
       setBidAmount("");
-    } catch (err: any) {
-      setTxStatus("idle");
-      setTxMessage(err.message.toUpperCase());
+    } catch (err: unknown) {
+      clearGlobalError(null);
+      const { message, type } = classifyError(err);
+      setTxMessageType(type);
+      setTxMessage(message);
+      setTxStatus(type === "warning" ? "idle" : "error");
     }
   };
 
   const handleClaim = async () => {
     setTxStatus("submitting");
     setTxMessage("");
+    setTxMessageType("error");
     setClaimResult(null);
     try {
       const fresh = await getAuctionDetails(auctionId, { manageState: false });
@@ -301,25 +337,34 @@ export default function AuctionRoom({ auctionId }: Props) {
       // Build success diagnostics
       const wonBalance = balAfter !== null ? formatAmount(balAfter) : null;
       setClaimResult({ txHash, tokenAddr: fresh.token, wonBalance });
+      triggerBalanceRefresh();
       setTxStatus("idle");
-    } catch (err: any) {
-      setTxStatus("idle");
-      setTxMessage(err.message.toUpperCase());
+    } catch (err: unknown) {
+      clearGlobalError(null);
+      const { message, type } = classifyError(err);
+      setTxMessageType(type);
+      setTxMessage(message);
+      setTxStatus(type === "warning" ? "idle" : "error");
     }
   };
 
   const handleReclaim = async () => {
     setTxStatus("submitting");
     setTxMessage("");
+    setTxMessageType("error");
     try {
       const fresh = await getAuctionDetails(auctionId, { manageState: false });
       if (fresh?.claimed) { setTxStatus("error"); setTxMessage("ALREADY CLAIMED."); return; }
       await reclaimUnsold(auctionId);
       await refreshAuction();
+      triggerBalanceRefresh();
       setTxStatus("idle");
-    } catch (err: any) {
-      setTxStatus("idle");
-      setTxMessage(err.message.toUpperCase());
+    } catch (err: unknown) {
+      clearGlobalError(null);
+      const { message, type } = classifyError(err);
+      setTxMessageType(type);
+      setTxMessage(message);
+      setTxStatus(type === "warning" ? "idle" : "error");
     }
   };
 
@@ -342,11 +387,10 @@ export default function AuctionRoom({ auctionId }: Props) {
 
   const isEnded = Math.floor(Date.now() / 1000) >= auction.endTime;
   const isStarted = Math.floor(Date.now() / 1000) >= auction.startTime;
-  const hasBids = auction.highestBid > 0n;
   const isCreator = normalizeAddr(address) === normalizeAddr(auction.creator);
   const isWinner = hasBids && normalizeAddr(address) === normalizeAddr(auction.highestBidder);
   const displayBid = hasBids ? auction.highestBid : auction.startPrice;
-  const minBidStr = hasBids ? formatAmount(auction.highestBid + 1n) : formatAmount(auction.startPrice);
+  const minBidStr = hasBids ? formatAmount(auction.highestBid + increment) : formatAmount(auction.startPrice + 1n);
   const statusBadge = isEnded ? "border-[#ef4444] text-[#ef4444]" : !isStarted ? "border-[#eab308] text-[#eab308]" : "border-[#22c55e] text-[#22c55e]";
 
   return (
@@ -465,7 +509,7 @@ export default function AuctionRoom({ auctionId }: Props) {
                   <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[#44445a]">{"BID AMOUNT (MIN: " + minBidStr + ")"}</label>
                   <input type="text" placeholder="0.00" value={bidAmount} onChange={e => setBidAmount(e.target.value)} className="w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-lg font-bold text-[#e8e8f0] outline-none transition focus:border-[#3b82f6] focus:shadow-[4px_4px_0px_0px_#1e40af]" />
                 </div>
-                <button type="submit" disabled={txStatus === "submitting" || !bidAmount} className="border-2 border-[#3b82f6] bg-[#3b82f6] px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[4px_4px_0px_0px_#1e40af] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#1e40af] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_0px_#1e40af]">
+                <button type="submit" disabled={txStatus === "submitting" || !bidAmount || isBidBelowMinimum} className="border-2 border-[#3b82f6] bg-[#3b82f6] px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[4px_4px_0px_0px_#1e40af] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#1e40af] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_0px_#1e40af]">
                   {txStatus === "submitting" ? <span className="flex items-center justify-center gap-2"><span className="inline-flex h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />SIGNING...</span> : "[ PLACE BID ]"}
                 </button>
               </form>
@@ -585,7 +629,11 @@ export default function AuctionRoom({ auctionId }: Props) {
                 )}
               </div>
             )}
-            {txMessage && <div className="mt-4 border-2 border-[#ef4444] bg-[#ef4444]/10 px-4 py-3"><p className="font-mono text-[10px] font-bold uppercase tracking-wider text-[#ef4444]">{txMessage}</p></div>}
+            {txMessage && (
+              <div className={`mt-4 border-2 px-4 py-3 ${txMessageType === "warning" ? "border-[#eab308] bg-[#eab308]/10" : "border-[#ef4444] bg-[#ef4444]/10"}`}>
+                <p className={`font-mono text-[10px] font-bold uppercase tracking-wider ${txMessageType === "warning" ? "text-[#eab308]" : "text-[#ef4444]"}`}>{txMessage}</p>
+              </div>
+            )}
           </div>
 
           {/* Auction Details */}
@@ -598,6 +646,7 @@ export default function AuctionRoom({ auctionId }: Props) {
                 ["BID TOKEN", truncateAddr(auction.bidToken)],
                 ["START", new Date(auction.startTime * 1000).toLocaleString()],
                 ["END", new Date(auction.endTime * 1000).toLocaleString()],
+                ["MIN INCREMENT", formatAmount(increment) + " PER BID"],
                 ...(hasBids ? [["WINNER", truncateAddr(auction.highestBidder)]] : [])
               ].map(([l, v], i) => (
                 <div key={l} className={"flex justify-between " + (i > 0 ? "border-t border-dashed border-[#1e1e2e] pt-3" : "")}>

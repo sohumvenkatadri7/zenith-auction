@@ -41,9 +41,14 @@ const parseErrorMessage = (rawError: string): string => {
   if (err.includes("TIMEOUT") || err.includes("NETWORK")) 
     return "NETWORK TIMEOUT: THE STELLAR NETWORK TOOK TOO LONG TO RESPOND.";
   if (err.includes("TRY_AGAIN_LATER"))
-    return "NETWORK BUSY: THE STELLAR RPC IS RATE-LIMITING. TRY AGAIN IN A FEW SECONDS.";
-  if (err.includes("TRANSFER_FROM"))
+    return "NETWORK BUSY: THE STELLAR RPC IS RATE-LIMITING. TRY AGAIN IN A FEW SECONDS.";  if (err.includes("TRANSFER_FROM")) 
     return "NFT TRANSFER FAILED: THE CONTRACT COULD NOT MOVE YOUR TOKEN. MAKE SURE YOU OWN THIS NFT AND HAVE APPROVED THE AUCTION.";
+  if (err.includes("APPROVE FAILED") || err.includes("APPROVE SIMULATION"))
+    return "NFT APPROVAL FAILED: COULD NOT APPROVE THE AUCTION CONTRACT TO TRANSFER YOUR NFT. MAKE SURE YOU OWN THIS TOKEN.";
+  if (err.includes("NOT AUTHORIZED") && err.includes("DON'T OWN"))
+    return "YOU DO NOT OWN THIS NFT. ONLY THE TOKEN OWNER CAN CREATE AN AUCTION FOR IT.";
+  if (err.includes("NFT NOT FOUND") || err.includes("TOKEN NOT FOUND"))
+    return "NFT NOT FOUND: THIS TOKEN ID DOES NOT EXIST IN THE NFT CONTRACT. DOUBLE-CHECK THE TOKEN ID.";
     
   // Fallback for unknown errors
   return "TRANSACTION FAILED: CHECK CONSOLE FOR DETAILS.";
@@ -55,7 +60,7 @@ function CreateAuctionInner() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const { address } = useWalletStore();
-  const { auctions } = useAuctionStore();
+  const { auctions, setError: clearGlobalError } = useAuctionStore();
   const { createAuction, fetchAllAuctions } = useAuction();
 
   // Read NFT params from URL
@@ -71,10 +76,12 @@ function CreateAuctionInner() {
   const [selectedBidToken, setSelectedBidToken] = useState(SUPPORTED_BID_TOKENS[0].address);
   const [customBidToken, setCustomBidToken] = useState("");
   const [startPrice, setStartPrice] = useState("");
+  const [minBidIncrement, setMinBidIncrement] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
   const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
+  const [messageType, setMessageType] = useState<"error" | "warning">("error");
   const [imgError, setImgError] = useState(false);
   const [isPrivate, setIsPrivate] = useState(false);
   const [allowlistInput, setAllowlistInput] = useState("");
@@ -109,7 +116,9 @@ function CreateAuctionInner() {
         return;
       }
 
-      if (!cleanTokenAddress || !finalBidTokenAddress || !cleanStartPrice || !startTime || !endTime) {
+      const cleanMinBidIncrement = minBidIncrement.trim();
+
+      if (!cleanTokenAddress || !finalBidTokenAddress || !cleanStartPrice || !cleanMinBidIncrement || !startTime || !endTime) {
         setStatus("error");
         setMessage("ALL FIELDS REQUIRED");
         return;
@@ -181,8 +190,16 @@ function CreateAuctionInner() {
         return;
       }
 
+      const minIncrementBigInt = BigInt(Math.round(Number(cleanMinBidIncrement) * 10 ** priceDecimals));
+      if (minIncrementBigInt <= 0n) {
+        setStatus("error");
+        setMessage("MIN BID INCREMENT MUST BE > 0");
+        return;
+      }
+
       setStatus("submitting");
       setMessage("");
+      setMessageType("error");
 
       try {
         // ── FIX: RESILIENT RETRY WRAPPER ──
@@ -198,6 +215,7 @@ function CreateAuctionInner() {
               BigInt(tokenIdParsed),
               finalBidTokenAddress, 
               priceBigInt,
+              minIncrementBigInt,
               startTs,
               endTs,
               isPrivate,
@@ -231,18 +249,17 @@ function CreateAuctionInner() {
           router.push(`/auction/${nextId}`);
         }, 2000);
       } catch (err: unknown) {
-        setStatus("error");
+        clearGlobalError(null);
         
-        if (err instanceof Error) {
-          setMessage(parseErrorMessage(err.message));
-          // Log the raw ugly error to the console for your debugging purposes
-          console.error("RAW TX ERROR:", err.message);
-        } else {
-          setMessage("AN UNKNOWN ERROR OCCURRED.");
-        }
+        const rawMsg = err instanceof Error ? err.message : "UNKNOWN ERROR";
+        const isRejection = /cancel|reject|denied|dismissed/i.test(rawMsg);
+        setMessageType(isRejection ? "warning" : "error");
+        setStatus(isRejection ? "idle" : "error");
+        setMessage(isRejection ? "TRANSACTION REJECTED — NO CHANGES WERE MADE" : parseErrorMessage(rawMsg));
+        console.error("RAW TX ERROR:", rawMsg);
       }
     },
-    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, startTime, endTime, isPrivate, allowlistInput, createAuction, fetchAllAuctions, router, nftPreview, urlTokenId]
+    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, minBidIncrement, startTime, endTime, isPrivate, allowlistInput, createAuction, fetchAllAuctions, router, nftPreview, urlTokenId]
   );
 
   const inputClass = "w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-sm text-[#e8e8f0] outline-none transition placeholder:text-[#44445a] disabled:opacity-50 focus:border-[#3b82f6]";
@@ -403,6 +420,23 @@ function CreateAuctionInner() {
             </p>
           </div>
 
+          <div>
+            <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+              MIN_BID_INCREMENT * (minimum increase per bid)
+            </label>
+            <input
+              type="text"
+              inputMode="decimal"
+              value={minBidIncrement}
+              onChange={(e) => setMinBidIncrement(e.target.value)}
+              placeholder="0.01"
+              className={inputClass}
+            />
+            <p className="mt-1 text-[10px] text-[#44445a]">
+              EACH NEW BID MUST EXCEED THE PREVIOUS BY AT LEAST THIS AMOUNT
+            </p>
+          </div>
+
           <div className="grid gap-4 sm:grid-cols-2">
             <div>
               <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
@@ -473,24 +507,25 @@ function CreateAuctionInner() {
           {/* ── Beautified Error/Success Alert ── */}
           {message && (
             <div
-              className={`mt-2 flex items-start gap-3 border-2 p-4 ${
-                status === "success"
+              className={`mt-2 flex items-start gap-3 border-2 p-4 $          {status === "success"
                   ? "border-[#22c55e] bg-[#22c55e]/10"
-                  : status === "error"
-                    ? "border-[#ef4444] bg-[#ef4444]/10"
-                    : ""
+                  : messageType === "warning"
+                    ? "border-[#eab308] bg-[#eab308]/10"
+                    : "border-[#ef4444] bg-[#ef4444]/10"
               }`}
             >
               <div className="mt-0.5">
                 {status === "success" ? (
                   <span className="text-[#22c55e]">✔</span>
+                ) : messageType === "warning" ? (
+                  <span className="text-[#eab308]">⚠</span>
                 ) : (
                   <span className="animate-pulse text-[#ef4444]">⚠</span>
                 )}
               </div>
               <div>
-                <h4 className={`text-[10px] font-bold uppercase tracking-widest ${status === "success" ? "text-[#22c55e]" : "text-[#ef4444]"}`}>
-                  {status === "success" ? "SUCCESS" : "TRANSACTION REJECTED"}
+                <h4 className={`text-[10px] font-bold uppercase tracking-widest ${status === "success" ? "text-[#22c55e]" : messageType === "warning" ? "text-[#eab308]" : "text-[#ef4444]"}`}>
+                  {status === "success" ? "SUCCESS" : messageType === "warning" ? "WARNING" : "ERROR"}
                 </h4>
                 <p className="mt-1 text-xs font-mono text-[#e8e8f0]">
                   {message}

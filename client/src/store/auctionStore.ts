@@ -9,6 +9,7 @@ export interface AuctionDetails {
   token_id: bigint;
   bidToken: string;
   startPrice: bigint;
+  minBidIncrement: bigint; // NEW: minimum increment between bids
   highestBid: bigint;
   highestBidder: string;
   startTime: number;

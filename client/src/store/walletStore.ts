@@ -7,12 +7,14 @@ interface WalletState {
   address: string | null;
   isConnecting: boolean;
   error: string | null;
+  balanceRefreshTrigger: number;
   setAddress: (address: string | null) => void;
   connect: (walletId: string) => Promise<void>;
   disconnect: () => void;
   signTx: (xdr: string, networkPassphrase: string) => Promise<string>;
   signAndSend: (tx: any) => Promise<any>;
   autoConnect: () => Promise<void>;
+  triggerBalanceRefresh: () => void;
 }
 
 export const useWalletStore = create<WalletState>()(
@@ -21,6 +23,7 @@ export const useWalletStore = create<WalletState>()(
       address: null,
       isConnecting: false,
       error: null,
+      balanceRefreshTrigger: 0,
       setAddress: (address) => set({ address, error: null }),
 
       connect: async (walletId: string) => {
@@ -92,6 +95,8 @@ export const useWalletStore = create<WalletState>()(
           throw err;
         }
       },
+
+      triggerBalanceRefresh: () => set(s => ({ balanceRefreshTrigger: s.balanceRefreshTrigger + 1 })),
 
       autoConnect: async () => {
         if (typeof window === "undefined") return;

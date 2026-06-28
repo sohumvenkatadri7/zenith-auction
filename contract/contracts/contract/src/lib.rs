@@ -27,6 +27,7 @@ pub struct Auction {
     pub token_id: i128, 
     pub bid_token: Address,
     pub start_price: i128,
+    pub min_bid_increment: i128, // NEW: minimum increment between bids
     pub highest_bid: i128,
     pub highest_bidder: Address,
     pub start_time: u64,
@@ -94,6 +95,7 @@ impl Contract {
         token_id: i128,
         bid_token: Address,
         start_price: i128,
+        min_bid_increment: i128, // NEW PARAM: minimum bid increment
         start_time: u64,
         end_time: u64,
         is_private: bool,
@@ -121,6 +123,7 @@ impl Contract {
             token_id, 
             bid_token,
             start_price,
+            min_bid_increment, // NEW FIELD
             highest_bid: 0i128,
             highest_bidder: creator.clone(),
             start_time,
@@ -168,7 +171,12 @@ impl Contract {
             return Err(AuctionError::NotActive);
         }
 
-        let min_bid = if auction.highest_bid == 0 { auction.start_price } else { auction.highest_bid + 1 };
+        // First bid must EXCEED start_price; subsequent bids must exceed highest_bid by min_bid_increment
+        let min_bid = if auction.highest_bid == 0 {
+            auction.start_price + 1
+        } else {
+            auction.highest_bid + auction.min_bid_increment
+        };
         if amount < min_bid {
             return Err(AuctionError::BidTooLow);
         }
@@ -275,6 +283,15 @@ impl Contract {
             .instance()
             .get(&DataKey::Auction(auction_id))
             .ok_or(AuctionError::NotFound)
+    }
+
+    // ── ADMIN CLEANUP FUNCTION ──
+    pub fn admin_delete_auction(env: Env, auction_id: u64) {
+        // Optional: If you want to secure this, uncomment the line below 
+        // and add an `admin: Address` parameter to the function.
+        // admin.require_auth();
+
+        env.storage().instance().remove(&DataKey::Auction(auction_id));
     }
 
     // FEATURE: BULK FETCH HELPER

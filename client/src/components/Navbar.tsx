@@ -1,14 +1,38 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import { useWalletStore } from "@/store/walletStore";
+import { useAuction } from "@/hooks/useAuction";
+import { DEFAULT_BID_TOKEN } from "@/lib/constants";
 import WalletModal from "./WalletModal";
 
 export default function Navbar() {
-  const { address, isConnecting, error, disconnect } = useWalletStore();
+  const { address, isConnecting, error, disconnect, balanceRefreshTrigger } = useWalletStore();
+  const { getTokenBalance } = useAuction();
   const [mobileOpen, setMobileOpen] = useState(false);
   const [isModalOpen, setIsModalOpen] = useState(false);
+  const [tokenBalance, setTokenBalance] = useState<string | null>(null);
+
+  // Fetch and display connected user's token balance
+  useEffect(() => {
+    if (!address) {
+      setTokenBalance(null);
+      return;
+    }
+    let cancelled = false;
+    const fetchBalance = async () => {
+      const bal = await getTokenBalance(DEFAULT_BID_TOKEN, address);
+      if (!cancelled && bal !== null) {
+        // Format from stroops (7 decimals) to display units
+        setTokenBalance((Number(bal) / 10 ** 7).toFixed(2));
+      }
+    };
+    fetchBalance();
+    // Refresh balance every 15 seconds
+    const iv = setInterval(fetchBalance, 15000);
+    return () => { cancelled = true; clearInterval(iv); };
+  }, [address, getTokenBalance, balanceRefreshTrigger]);
 
   const truncate = (addr: string | null) => {
     if (!addr) return "";
@@ -70,6 +94,13 @@ export default function Navbar() {
 
           {address ? (
             <div className="flex items-center gap-3">
+              {/* Token Balance Badge */}
+              {tokenBalance !== null && (
+                <div className="hidden items-center gap-1.5 border-2 border-[#22c55e] bg-[#22c55e]/10 px-3 py-1 sm:flex">
+                  <span className="text-[10px] font-bold uppercase text-[#22c55e]">XLM</span>
+                  <span className="font-mono text-xs font-bold text-[#e8e8f0]">{tokenBalance}</span>
+                </div>
+              )}
               <div className="hidden items-center gap-2 border-2 border-[#1e1e2e] bg-[#0e0e16] px-3 py-1 sm:flex">
                 <span className="live-dot" />
                 <span className="text-xs text-[#6b6b80]">

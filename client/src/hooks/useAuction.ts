@@ -42,6 +42,9 @@ function parseContractError(rawError: string, contractAddr: string): string | nu
   if (contractAddr === NFT_CONTRACT_ADDRESS) {
     switch (code) {
       case 1: return "NOT AUTHORIZED: YOU DON'T OWN THIS NFT.";
+      case 2: return "NFT NOT FOUND: THIS TOKEN ID DOES NOT EXIST IN THE NFT CONTRACT.";
+      case 3: return "TOKEN ALREADY EXISTS.";
+      case 4: return "NFT CONTRACT NOT INITIALIZED.";
     }
   }
   if (contractAddr === CONTRACT_ADDRESS) {
@@ -122,12 +125,36 @@ export function useAuction() {
       const server = getServer();
       if (!server || !address) throw new Error("Wallet not connected");
       const nftContract = new Contract(tokenAddress);
+
+      // ── Pre-flight: verify user actually owns the NFT ──
+      try {
+        const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+        const ownerTx = new TransactionBuilder(dummySource, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
+          .addOperation(nftContract.call("owner_of", nativeToScVal(tokenId, { type: "i128" })))
+          .setTimeout(30).build();
+        const ownerSim = await server.simulateTransaction(ownerTx);
+        if ("result" in ownerSim && ownerSim.result?.retval) {
+          const ownerAddr = scValToNative(ownerSim.result.retval);
+          if (String(ownerAddr) !== address) {
+            throw new Error(`NOT AUTHORIZED: YOU DON'T OWN THIS NFT. Owner is ${String(ownerAddr)}, you are ${address}.`);
+          }
+        }
+      } catch (preErr: any) {
+        if (preErr?.message?.includes("NOT AUTHORIZED")) throw preErr;
+        // If the NFT doesn't exist at all, owner_of will fail — fall through to approve to get the real error
+      }
+
       const source = await server.getAccount(address);
       const tx = new TransactionBuilder(source, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
         .addOperation(nftContract.call("approve", new Address(address).toScVal(), new Address(CONTRACT_ADDRESS).toScVal(), nativeToScVal(tokenId, { type: "i128" })))
         .setTimeout(30).build();
       const sim = await server.simulateTransaction(tx);
-      if ("error" in sim) throw new Error("Approve simulation failed");
+      if ("error" in sim) {
+        // Decode the simulation error into a human-readable message
+        const simError = typeof sim.error === "string" ? sim.error : JSON.stringify(sim.error);
+        const decoded = parseContractError(simError, tokenAddress);
+        throw new Error(decoded || `APPROVE FAILED: ${simError}`);
+      }
       const signedXdr = await signTx(assembleTransaction(tx, sim).build().toXDR(), NETWORK.networkPassphrase);
       const sendResult = await server.sendTransaction(TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase));
       const txResult = await server.pollTransaction(sendResult.hash!, { attempts: 30 });
@@ -198,6 +225,7 @@ export function useAuction() {
         token_id: BigInt(raw.token_id),
         bidToken: String(raw.bid_token),
         startPrice: BigInt(raw.start_price),
+        minBidIncrement: BigInt(raw.min_bid_increment), // NEW: parsed from contract
         highestBid: BigInt(raw.highest_bid),
         highestBidder: String(raw.highest_bidder),
         startTime: Number(raw.start_time),
@@ -226,6 +254,7 @@ export function useAuction() {
     tokenId: bigint, 
     bidToken: string, 
     startPrice: bigint, 
+    minBidIncrement: bigint, // NEW PARAM: minimum bid increment
     startTime: number, 
     endTime: number, 
     isPrivate: boolean, 
@@ -236,13 +265,14 @@ export function useAuction() {
         await approveNft(token, tokenId);
       }
 
-      // 2. Submit Auction
+      // 2. Submit Auction — params order matches Rust create_auction signature
       const params = [
         new Address(creator).toScVal(), 
         new Address(token).toScVal(), 
         nativeToScVal(tokenId, { type: "i128" }), 
         new Address(bidToken).toScVal(), 
         nativeToScVal(startPrice, { type: "i128" }), 
+        nativeToScVal(minBidIncrement, { type: "i128" }), // NEW: matches Rust param order
         nativeToScVal(startTime, { type: "u64" }), 
         nativeToScVal(endTime, { type: "u64" }), 
         xdr.ScVal.scvBool(isPrivate), 
