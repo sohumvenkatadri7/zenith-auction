@@ -2,6 +2,7 @@
 
 import { useEffect, useState, useCallback, useRef } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore, type AuctionDetails } from "@/store/auctionStore";
 import { useAuction } from "@/hooks/useAuction";
@@ -99,25 +100,25 @@ function BidActivityTracker({ auction }: { auction: { highestBid: bigint; highes
   return (
     <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-6">
       <div className="mb-4 flex items-center justify-between">
-        <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">// BID ACTIVITY</h2>
+        <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">// BID ACTIVITY</h2>
         <div className="flex items-center gap-1.5">
           {!isEnded && <LiveDot />}
-          <span className="font-mono text-[10px] text-[#44445a]">{totalBidChanges} CHANGE{totalBidChanges !== 1 ? "S" : ""} DETECTED</span>
+          <span className="font-mono text-[10px] text-[#9898b0]">{totalBidChanges} CHANGE{totalBidChanges !== 1 ? "S" : ""} DETECTED</span>
         </div>
       </div>
 
       {/* Status Summary */}
       <div className="mb-4 grid grid-cols-3 gap-3">
         <div className="border border-[#1e1e2e] bg-[#0a0a0f] p-3 text-center">
-          <p className="text-[9px] font-bold uppercase text-[#44445a]">TOTAL CHANGES</p>
+          <p className="text-[9px] font-bold uppercase text-[#c8c8d8]">TOTAL CHANGES</p>
           <p className="mt-1 font-mono text-lg font-bold text-[#3b82f6]">{totalBidChanges}</p>
         </div>
         <div className="border border-[#1e1e2e] bg-[#0a0a0f] p-3 text-center">
-          <p className="text-[9px] font-bold uppercase text-[#44445a]">LATEST BIDDER</p>
+          <p className="text-[9px] font-bold uppercase text-[#c8c8d8]">LATEST BIDDER</p>
           <p className="mt-1 font-mono text-[10px] text-[#e8e8f0]">{truncateAddr(auction.highestBidder)}</p>
         </div>
         <div className="border border-[#1e1e2e] bg-[#0a0a0f] p-3 text-center">
-          <p className="text-[9px] font-bold uppercase text-[#44445a]">STATUS</p>
+          <p className="text-[9px] font-bold uppercase text-[#c8c8d8]">STATUS</p>
           <p className={`mt-1 font-mono text-[10px] font-bold ${isEnded ? 'text-[#6b6b80]' : 'text-[#22c55e]'}`}>{isEnded ? 'ENDED' : 'ACTIVE'}</p>
         </div>
       </div>
@@ -125,7 +126,7 @@ function BidActivityTracker({ auction }: { auction: { highestBid: bigint; highes
       {/* Activity Log */}
       {snapshots.length === 0 ? (
         <div className="flex h-32 items-center justify-center border-2 border-dashed border-[#1e1e2e]">
-          <p className="font-mono text-[10px] uppercase tracking-widest text-[#44445a]">NO BID CHANGES YET — MONITORING...</p>
+          <p className="font-mono text-[10px] uppercase tracking-widest text-[#9898b0]">NO BID CHANGES YET — MONITORING...</p>
         </div>
       ) : (
         <div className="flex h-48 flex-col gap-1 overflow-y-auto pr-1">
@@ -133,11 +134,11 @@ function BidActivityTracker({ auction }: { auction: { highestBid: bigint; highes
             <div key={snap.timestamp + "-" + i} className={"flex items-center justify-between border border-[#1e1e2e] bg-[#0a0a0f] px-3 py-2 font-mono text-xs " + (i === 0 ? "border-[#3b82f6]/40 bg-[#3b82f6]/5" : "")}>
               <div className="flex items-center gap-2">
                 <span className={"h-1.5 w-1.5 rounded-full " + (i === 0 ? "bg-[#22c55e]" : "bg-[#1e1e2e]")} />
-                <span className="text-[#6b6b80]">{truncateAddr(snap.bidder)}</span>
+                <span className="text-[#9898b0]">{truncateAddr(snap.bidder)}</span>
               </div>
               <div className="flex items-center gap-3">
                 <span className="text-[#3b82f6]">{formatAmount(BigInt(snap.amount))}</span>
-                <span className="text-[10px] text-[#44445a]">{relativeTime(snap.timestamp)}</span>
+                <span className="text-[10px] text-[#9898b0]">{relativeTime(snap.timestamp)}</span>
               </div>
             </div>
           ))}
@@ -148,7 +149,7 @@ function BidActivityTracker({ auction }: { auction: { highestBid: bigint; highes
 }
 
 function StatBox({ label, value, color }: { label: string; value: string; color?: string }) {
-  return (<div className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">{label}</span><span className={"font-mono text-sm font-bold " + (color || "text-[#e8e8f0]")}>{value}</span></div>);
+  return (<div className="flex flex-col gap-1"><span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">{label}</span><span className={"font-mono text-sm font-bold " + (color || "text-[#e8e8f0]")}>{value}</span></div>);
 }
 
 /** Detect wallet rejection / user cancellation errors */
@@ -167,9 +168,10 @@ function classifyError(err: unknown): { message: string; type: "error" | "warnin
 }
 
 export default function AuctionRoom({ auctionId }: Props) {
+  const router = useRouter();
   const { address, triggerBalanceRefresh } = useWalletStore();
   const { isLoading, error, setError: clearGlobalError } = useAuctionStore();
-  const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold, getTokenBalance } = useAuction();
+  const { getAuctionDetails, placeBid, claimWinning, reclaimUnsold, cancelAuction, getTokenBalance } = useAuction();
 
   // Use local state so each auction page is isolated (prevents cross-contamination)
   const [auction, setAuctionLocal] = useState<AuctionDetails | null>(null);
@@ -323,9 +325,6 @@ export default function AuctionRoom({ auctionId }: Props) {
         return;
       }
 
-      // Pre-flight: check winner's token balance before claim
-      const balBefore = await getTokenBalance(fresh.token, fresh.highestBidder);
-
       // Execute claim
       const txHash = await claimWinning(auctionId);
 
@@ -368,8 +367,28 @@ export default function AuctionRoom({ auctionId }: Props) {
     }
   };
 
+  // ── Cancel Auction (creator-only, no bids) ──────────────────────
+  const handleCancel = async () => {
+    setTxStatus("submitting");
+    setTxMessage("");
+    setTxMessageType("error");
+    try {
+      await cancelAuction(auctionId);
+      // Wait 3 seconds for ledger settlement, then redirect
+      await new Promise(r => setTimeout(r, 3000));
+      triggerBalanceRefresh();
+      router.push("/");
+    } catch (err: unknown) {
+      clearGlobalError(null);
+      const { message, type } = classifyError(err);
+      setTxMessageType(type);
+      setTxMessage(message);
+      setTxStatus(type === "warning" ? "idle" : "error");
+    }
+  };
+
   if ((isLoading || localLoading) && !auction) {
-    return (<main className="flex flex-1 items-center justify-center p-10"><div className="flex items-center gap-3"><span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[#3b82f6]" /><span className="font-mono text-xs font-bold uppercase tracking-widest text-[#6b6b80]">SYNCING WITH LEDGER...</span></div></main>);
+    return (<main className="flex flex-1 items-center justify-center p-10"><div className="flex items-center gap-3"><span className="inline-flex h-2 w-2 animate-pulse rounded-full bg-[#3b82f6]" /><span className="font-mono text-xs font-bold uppercase tracking-widest text-[#9898b0]">SYNCING WITH LEDGER...</span></div></main>);
   }
 
   if (error || !auction) {
@@ -378,7 +397,7 @@ export default function AuctionRoom({ auctionId }: Props) {
         <div className="border-2 border-[#ef4444] bg-[#ef4444]/10 p-8 text-center shadow-[6px_6px_0px_0px_#7f1d1d]">
           <p className="mb-2 font-mono text-lg font-bold text-[#ef4444]">!!</p>
           <p className="font-mono text-xs font-bold uppercase tracking-widest text-[#ef4444]">{error || "AUCTION NOT FOUND"}</p>
-          <p className="mt-2 font-mono text-[10px] text-[#6b6b80]">{"AUCTION #" + auctionId.toString() + " COULD NOT BE LOADED FROM THE LEDGER."}</p>
+          <p className="mt-2 font-mono text-[10px] text-[#9898b0]">{"AUCTION #" + auctionId.toString() + " COULD NOT BE LOADED FROM THE LEDGER."}</p>
         </div>
         <Link href="/" className="text-[10px] font-bold uppercase tracking-wider text-[#3b82f6] hover:underline">&lt; RETURN TO EXPLORE</Link>
       </main>
@@ -398,11 +417,11 @@ export default function AuctionRoom({ auctionId }: Props) {
 
       {/* Status Bar */}
       <div className="flex items-center justify-between border-b-2 border-[#1e1e2e] pb-3">
-        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+        <div className="flex items-center gap-2 text-[10px] font-bold uppercase tracking-widest text-[#9898b0]">
           <LiveDot /><span>{isEnded ? "OFFLINE" : "LIVE"}</span><span className="text-[#1e1e2e]">|</span><span>LEDGER SYNC</span>
-          {lastSync && <span className="text-[#6b6b80]">{lastSync.toLocaleTimeString()}</span>}
+          {lastSync && <span className="text-[#9898b0]">{lastSync.toLocaleTimeString()}</span>}
         </div>
-        <Link href="/" className="text-[10px] font-bold uppercase tracking-wider text-[#6b6b80] transition hover:text-[#3b82f6]">&lt; BACK</Link>
+        <Link href="/" className="text-[10px] font-bold uppercase tracking-wider text-[#9898b0] transition hover:text-[#3b82f6]">&lt; BACK</Link>
       </div>
 
       {/* NFT Image + Title Display */}
@@ -428,12 +447,12 @@ export default function AuctionRoom({ auctionId }: Props) {
             />
           ) : (
             <div className="flex h-24 w-24 flex-shrink-0 items-center justify-center border-2 border-[#1e1e2e] bg-[#0e0e16]">
-              <span className="text-2xl font-bold text-[#6b6b80]">#{auction.token_id.toString()}</span>
+              <span className="text-2xl font-bold text-[#9898b0]">#{auction.token_id.toString()}</span>
             </div>
           )}
           <div className="flex flex-col gap-1">
             <h2 className="text-xl font-black uppercase tracking-tight text-[#e8e8f0] sm:text-2xl">{nftMeta.name}</h2>
-            <p className="font-mono text-[10px] uppercase tracking-widest text-[#44445a]">{truncateAddr(auction.token) + " → ACCEPTS " + truncateAddr(auction.bidToken)}</p>
+            <p className="font-mono text-[10px] uppercase tracking-widest text-[#9898b0]">{truncateAddr(auction.token) + " → ACCEPTS " + truncateAddr(auction.bidToken)}</p>
             {auction.isPrivate && (
               <span className="mt-1 inline-flex w-fit border border-[#a855f7] px-2 py-0.5 text-[9px] font-bold uppercase tracking-widest text-[#a855f7]">PRIVATE</span>
             )}
@@ -445,7 +464,7 @@ export default function AuctionRoom({ auctionId }: Props) {
       <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
           <h1 className="text-3xl font-black uppercase tracking-tighter text-[#e8e8f0] sm:text-5xl">{nftMeta?.name && nftMeta.name !== "Untitled NFT" ? nftMeta.name : "AUCTION #" + auction.id.toString()}</h1>
-          <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[#44445a]">{"AUCTION #" + auction.id.toString() + " — " + truncateAddr(auction.token) + " → ACCEPTS " + truncateAddr(auction.bidToken)}</p>
+          <p className="mt-1 font-mono text-[10px] uppercase tracking-widest text-[#9898b0]">{"AUCTION #" + auction.id.toString() + " — " + truncateAddr(auction.token) + " → ACCEPTS " + truncateAddr(auction.bidToken)}</p>
         </div>
         <div className="flex items-center gap-2 self-start">
           {auction.isPrivate && (
@@ -460,8 +479,8 @@ export default function AuctionRoom({ auctionId }: Props) {
       {/* Countdown + Progress */}
       <div className={"border-2 border-[#1e1e2e] bg-[#0a0a0f] p-5 shadow-[8px_8px_0px_0px_#050508] " + (bidFlash ? "animate-bid-flash" : "")}>
         <div className="mb-3 flex items-center justify-between">
-          <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">{isEnded ? "// SETTLED" : isStarted ? "// TIME REMAINING" : "// STARTS IN"}</h2>
-          <span className="font-mono text-[10px] text-[#44445a]">{formatDuration(Math.max(0, auction.endTime - auction.startTime))}</span>
+          <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">{isEnded ? "// SETTLED" : isStarted ? "// TIME REMAINING" : "// STARTS IN"}</h2>
+          <span className="font-mono text-[10px] text-[#9898b0]">{formatDuration(Math.max(0, auction.endTime - auction.startTime))}</span>
         </div>
         <UrgencyCountdown timeLeft={timeLeft} urgency={urgency} />
         <div className="mt-3"><ProgressBar percent={progress} urgency={urgency} /></div>
@@ -476,19 +495,19 @@ export default function AuctionRoom({ auctionId }: Props) {
           {/* Current Bid Card */}
           <div className={"border-2 border-[#1e1e2e] bg-[#0e0e16] p-6 transition-all " + (bidFlash ? "animate-bid-flash border-[#3b82f6]/40" : "")}>
             <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">// CURRENT HIGHEST BID</h2>
-              <button onClick={refreshAuction} className="border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#3b82f6] hover:text-[#3b82f6]">SYNC</button>
+              <h2 className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">// CURRENT HIGHEST BID</h2>
+              <button onClick={refreshAuction} className="border border-[#1e1e2e] bg-[#0a0a0f] px-2 py-1 text-[9px] font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#3b82f6] hover:text-[#3b82f6]">SYNC</button>
             </div>
             <div className={"font-mono text-5xl font-black text-[#3b82f6] transition-all " + (highestBidPop ? "animate-number-pop" : "")}>{formatAmount(displayBid)}</div>
             <div className="mt-3 flex items-center gap-2">
-              <span className="text-[10px] uppercase text-[#44445a]">{hasBids ? "HELD BY" : "STARTING PRICE"}</span>
+              <span className="text-[10px] uppercase text-[#9898b0]">{hasBids ? "HELD BY" : "STARTING PRICE"}</span>
               <span className="font-mono text-[10px] text-[#e8e8f0]">{hasBids ? truncateAddr(auction.highestBidder) : "NO BIDS YET"}</span>
               {hasBids && isWinner && <span className="border border-[#22c55e] px-1.5 py-0.5 text-[8px] font-bold uppercase text-[#22c55e]">YOU</span>}
             </div>
             <div className="mt-6 grid grid-cols-3 gap-4 border-t-2 border-dashed border-[#1e1e2e] pt-4">
               <StatBox label="CREATOR" value={truncateAddr(auction.creator)} />
-              <StatBox label="START PRICE" value={formatAmount(auction.startPrice)} color="text-[#6b6b80]" />
-              <StatBox label="BIDS" value={hasBids ? "1+" : "0"} color={hasBids ? "text-[#3b82f6]" : "text-[#6b6b80]"} />
+              <StatBox label="START PRICE" value={formatAmount(auction.startPrice)} color="text-[#9898b0]" />
+              <StatBox label="BIDS" value={hasBids ? "1+" : "0"} color={hasBids ? "text-[#3b82f6]" : "text-[#9898b0]"} />
             </div>
           </div>
 
@@ -501,12 +520,12 @@ export default function AuctionRoom({ auctionId }: Props) {
 
           {/* Action Panel */}
           <div className="border-2 border-[#1e1e2e] bg-[#0a0a0f] p-6 shadow-[8px_8px_0px_0px_#050508]">
-            <h2 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">// {isEnded ? "SETTLEMENT" : !isStarted ? "WAITING FOR START" : "PLACE YOUR BID"}</h2>
+            <h2 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">// {isEnded ? "SETTLEMENT" : !isStarted ? "WAITING FOR START" : "PLACE YOUR BID"}</h2>
 
             {!isEnded && isStarted ? (
               <form onSubmit={handleBid} className="flex flex-col gap-4">
                 <div>
-                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[#44445a]">{"BID AMOUNT (MIN: " + minBidStr + ")"}</label>
+                  <label className="mb-1 block text-[10px] font-bold uppercase tracking-wider text-[#c8c8d8]">{"BID AMOUNT (MIN: " + minBidStr + ")"}</label>
                   <input type="text" placeholder="0.00" value={bidAmount} onChange={e => setBidAmount(e.target.value)} className="w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-lg font-bold text-[#e8e8f0] outline-none transition focus:border-[#3b82f6] focus:shadow-[4px_4px_0px_0px_#1e40af]" />
                 </div>
                 <button type="submit" disabled={txStatus === "submitting" || !bidAmount || isBidBelowMinimum} className="border-2 border-[#3b82f6] bg-[#3b82f6] px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[4px_4px_0px_0px_#1e40af] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#1e40af] disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0 disabled:hover:shadow-[4px_4px_0px_0px_#1e40af]">
@@ -514,9 +533,15 @@ export default function AuctionRoom({ auctionId }: Props) {
                 </button>
               </form>
             ) : !isStarted ? (
+              /* ── Not yet started: show cancel button for creator if no bids ── */
               <div className="flex flex-col items-center gap-3 py-6 text-center">
                 <p className="font-mono text-xs text-[#eab308]">AUCTION HAS NOT STARTED YET</p>
-                <p className="font-mono text-[10px] text-[#44445a]">{"BEGINS " + new Date(auction.startTime * 1000).toLocaleString()}</p>
+                <p className="font-mono text-[10px] text-[#9898b0]">{"BEGINS " + new Date(auction.startTime * 1000).toLocaleString()}</p>
+                {isCreator && !hasBids && (
+                  <button onClick={handleCancel} disabled={txStatus === "submitting"} className="mt-3 border-2 border-[#ef4444] bg-[#ef4444]/10 px-6 py-3 text-xs font-bold uppercase tracking-wider text-[#ef4444] shadow-[4px_4px_0px_0px_#7f1d1d] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#7f1d1d] disabled:opacity-50">
+                    {txStatus === "submitting" ? "SIGNING..." : "[ CANCEL AUCTION & RECLAIM NFT ]"}
+                  </button>
+                )}
               </div>
             ) : (
               /* ── ENDED STATE ────────────────────────────── */
@@ -524,12 +549,12 @@ export default function AuctionRoom({ auctionId }: Props) {
                 {auction.claimed ? (
                   /* ── Already settled ────────────────────── */
                   <div className="flex flex-col items-center gap-3 py-6 text-center">
-                    <p className="text-lg text-[#6b6b80]">done</p>
-                    <p className="font-mono text-xs font-bold uppercase text-[#6b6b80]">SETTLED</p>
-                    <p className="font-mono text-[10px] text-[#44445a]">THIS AUCTION HAS BEEN CLAIMED AND SETTLED ON-CHAIN.</p>
+                    <p className="text-lg text-[#9898b0]">done</p>
+                    <p className="font-mono text-xs font-bold uppercase text-[#9898b0]">SETTLED</p>
+                    <p className="font-mono text-[10px] text-[#9898b0]">THIS AUCTION HAS BEEN CLAIMED AND SETTLED ON-CHAIN.</p>
                     {hasBids && (
                       <div className="mt-2 border border-[#1e1e2e] p-3 text-center">
-                        <p className="text-[10px] font-bold uppercase text-[#44445a]">WINNER</p>
+                        <p className="text-[10px] font-bold uppercase text-[#c8c8d8]">WINNER</p>
                         <p className="mt-1 font-mono text-xs text-[#3b82f6]">{truncateAddr(auction.highestBidder)}</p>
                       </div>
                     )}
@@ -546,29 +571,29 @@ export default function AuctionRoom({ auctionId }: Props) {
                           <div className="mt-3 flex flex-col gap-2">
                             {claimResult.wonBalance && (
                               <div className="flex justify-between border-t border-dashed border-[#1e1e2e] pt-2">
-                                <span className="text-[10px] uppercase text-[#44445a]">YOUR BALANCE</span>
+                                <span className="text-[10px] uppercase text-[#9898b0]">YOUR BALANCE</span>
                                 <span className="font-mono text-xs font-bold text-[#22c55e]">{claimResult.wonBalance} OF THIS TOKEN</span>
                               </div>
                             )}
                             <div className="flex justify-between">
-                              <span className="text-[10px] uppercase text-[#44445a]">TX HASH</span>
+                              <span className="text-[10px] uppercase text-[#9898b0]">TX HASH</span>
                               <span className="font-mono text-[10px] text-[#3b82f6]">{truncateAddr(claimResult.txHash)}</span>
                             </div>
                           </div>
                         </div>
                         <div className="border border-[#eab308]/30 bg-[#eab308]/5 p-3">
                           <p className="font-mono text-[10px] font-bold uppercase text-[#eab308]">NOT SEEING THE TOKEN IN YOUR WALLET?</p>
-                          <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">ADD THIS ASSET MANUALLY USING THE CONTRACT ADDRESS:</p>
+                          <p className="mt-1 font-mono text-[10px] text-[#9898b0]">ADD THIS ASSET MANUALLY USING THE CONTRACT ADDRESS:</p>
                           <p className="mt-1 break-all font-mono text-[10px] text-[#e8e8f0]">{claimResult.tokenAddr}</p>
-                          <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">IN FREIGHTER: WALLET &rarr; ADD ASSET &rarr; CONTRACT ADDRESS</p>
+                          <p className="mt-1 font-mono text-[10px] text-[#9898b0]">IN FREIGHTER: WALLET &rarr; ADD ASSET &rarr; CONTRACT ADDRESS</p>
                         </div>
                       </div>
                     ) : (
                       /* ── Pre-claim UI ── */
                       <div className="border-2 border-[#22c55e] bg-[#22c55e]/5 p-4 text-center shadow-[4px_4px_0px_0px_#15803d]">
                         <p className="text-sm font-bold uppercase text-[#22c55e]">YOU WON THIS AUCTION</p>
-                        <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">PRIZE: {truncateAddr(auction.token)}</p>
-                        <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">WINNING BID: {formatAmount(auction.highestBid)}</p>
+                        <p className="mt-1 font-mono text-[10px] text-[#9898b0]">PRIZE: {truncateAddr(auction.token)}</p>
+                        <p className="mt-1 font-mono text-[10px] text-[#9898b0]">WINNING BID: {formatAmount(auction.highestBid)}</p>
                         <p className="mt-2 font-mono text-[10px] text-[#22c55e]">CLICK BELOW TO CLAIM YOUR ASSET ON-CHAIN</p>
                       </div>
                     )}
@@ -586,7 +611,7 @@ export default function AuctionRoom({ auctionId }: Props) {
                   <div className="flex flex-col gap-3">
                     <div className="border border-[#eab308]/20 bg-[#eab308]/5 p-4 text-center">
                       <p className="text-[10px] font-bold uppercase text-[#eab308]">NO BIDS PLACED</p>
-                      <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">RECLAIM YOUR ASSET FROM THE CONTRACT</p>
+                      <p className="mt-1 font-mono text-[10px] text-[#9898b0]">RECLAIM YOUR ASSET FROM THE CONTRACT</p>
                     </div>
                     <button onClick={handleReclaim} disabled={txStatus === "submitting"} className="border-2 border-[#eab308] bg-[#eab308]/10 py-4 text-sm font-bold uppercase tracking-wider text-[#eab308] shadow-[4px_4px_0px_0px_#854d0e] transition hover:-translate-x-0.5 hover:-translate-y-0.5 disabled:opacity-50 disabled:hover:translate-x-0 disabled:hover:translate-y-0">{txStatus === "submitting" ? "SIGNING..." : "[ RECLAIM ASSET ]"}</button>
                   </div>
@@ -598,11 +623,11 @@ export default function AuctionRoom({ auctionId }: Props) {
                       <p className="text-[10px] font-bold uppercase text-[#3b82f6]">AUCTION ENDED — PRIZE UNCLAIMED</p>
                       <div className="mt-3 flex flex-col gap-2">
                         <div className="flex justify-between border-t border-dashed border-[#1e1e2e] pt-2">
-                          <span className="text-[10px] uppercase text-[#44445a]">WINNER</span>
+                          <span className="text-[10px] uppercase text-[#9898b0]">WINNER</span>
                           <span className="font-mono text-xs font-bold text-[#3b82f6]">{truncateAddr(auction.highestBidder)}</span>
                         </div>
                         <div className="flex justify-between">
-                          <span className="text-[10px] uppercase text-[#44445a]">WINNING BID</span>
+                          <span className="text-[10px] uppercase text-[#9898b0]">WINNING BID</span>
                           <span className="font-mono text-xs font-bold text-[#e8e8f0]">{formatAmount(auction.highestBid)}</span>
                         </div>
                       </div>
@@ -610,12 +635,12 @@ export default function AuctionRoom({ auctionId }: Props) {
                     {!address ? (
                       <div className="border border-[#eab308]/30 bg-[#eab308]/5 p-3 text-center">
                         <p className="font-mono text-[10px] font-bold uppercase text-[#eab308]">CONNECT THE WINNING WALLET TO CLAIM</p>
-                        <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">THE WINNER MUST CONNECT THEIR WALLET AND CLICK CLAIM</p>
+                        <p className="mt-1 font-mono text-[10px] text-[#9898b0]">THE WINNER MUST CONNECT THEIR WALLET AND CLICK CLAIM</p>
                       </div>
                     ) : !isWinner ? (
                       <div className="border border-[#eab308]/30 bg-[#eab308]/5 p-3 text-center">
                         <p className="font-mono text-[10px] font-bold uppercase text-[#eab308]">THIS IS NOT THE WINNING WALLET</p>
-                        <p className="mt-1 font-mono text-[10px] text-[#6b6b80]">CONNECT WALLET {truncateAddr(auction.highestBidder)} TO CLAIM THE PRIZE</p>
+                        <p className="mt-1 font-mono text-[10px] text-[#9898b0]">CONNECT WALLET {truncateAddr(auction.highestBidder)} TO CLAIM THE PRIZE</p>
                       </div>
                     ) : null}
                   </div>
@@ -623,8 +648,13 @@ export default function AuctionRoom({ auctionId }: Props) {
                 ) : (
                   /* ── Ended with no bids at all ───────────── */
                   <div className="flex flex-col items-center gap-3 py-6 text-center">
-                    <p className="font-mono text-[10px] text-[#6b6b80]">AUCTION ENDED — NO BIDS</p>
-                    <p className="font-mono text-[10px] text-[#44445a]">THIS AUCTION RECEIVED NO BIDS.</p>
+                    <p className="font-mono text-[10px] text-[#9898b0]">AUCTION ENDED — NO BIDS</p>
+                    <p className="font-mono text-[10px] text-[#9898b0]">THIS AUCTION RECEIVED NO BIDS.</p>
+                    {isCreator && (
+                      <button onClick={handleCancel} disabled={txStatus === "submitting"} className="mt-3 border-2 border-[#ef4444] bg-[#ef4444]/10 px-6 py-3 text-xs font-bold uppercase tracking-wider text-[#ef4444] shadow-[4px_4px_0px_0px_#7f1d1d] transition hover:-translate-x-0.5 hover:-translate-y-0.5 hover:shadow-[6px_6px_0px_0px_#7f1d1d] disabled:opacity-50">
+                        {txStatus === "submitting" ? "SIGNING..." : "[ CANCEL AUCTION & RECLAIM NFT ]"}
+                      </button>
+                    )}
                   </div>
                 )}
               </div>
@@ -638,7 +668,7 @@ export default function AuctionRoom({ auctionId }: Props) {
 
           {/* Auction Details */}
           <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-6">
-            <h2 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-[#44445a]">// AUCTION DETAILS</h2>
+            <h2 className="mb-4 text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">// AUCTION DETAILS</h2>
             <div className="flex flex-col gap-3 font-mono text-xs">
               {[
                 ["CREATOR", truncateAddr(auction.creator)],
@@ -650,7 +680,7 @@ export default function AuctionRoom({ auctionId }: Props) {
                 ...(hasBids ? [["WINNER", truncateAddr(auction.highestBidder)]] : [])
               ].map(([l, v], i) => (
                 <div key={l} className={"flex justify-between " + (i > 0 ? "border-t border-dashed border-[#1e1e2e] pt-3" : "")}>
-                  <span className="text-[#44445a]">{l}</span>
+                  <span className="text-[#9898b0]">{l}</span>
                   <span className={l === "WINNER" ? "text-[#3b82f6]" : "text-[#e8e8f0]"}>{v}</span>
                 </div>
               ))}

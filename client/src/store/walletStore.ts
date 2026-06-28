@@ -2,6 +2,22 @@
 
 import { create } from "zustand";
 import { createJSONStorage, persist } from "zustand/middleware";
+import { StellarWalletsKit, Networks } from "@creit.tech/stellar-wallets-kit";
+import { defaultModules } from "@creit.tech/stellar-wallets-kit/modules/utils";
+
+// ── Initialize the Stellar Wallets Kit once (singleton pattern) ──────────
+// This enables Freighter (desktop extension), Albedo (mobile web),
+// WalletConnect (LOBSTR & native apps), and all other supported modules.
+let kitInitialized = false;
+
+function ensureKitInit() {
+  if (kitInitialized || typeof window === "undefined") return;
+  StellarWalletsKit.init({
+    modules: defaultModules(),
+    network: Networks.TESTNET,
+  });
+  kitInitialized = true;
+}
 
 interface WalletState {
   address: string | null;
@@ -9,10 +25,10 @@ interface WalletState {
   error: string | null;
   balanceRefreshTrigger: number;
   setAddress: (address: string | null) => void;
-  connect: (walletId: string) => Promise<void>;
+  connect: () => Promise<void>;
   disconnect: () => void;
   signTx: (xdr: string, networkPassphrase: string) => Promise<string>;
-  signAndSend: (tx: any) => Promise<any>;
+  signAndSend: (tx: { toXDR(): string }) => Promise<unknown>;
   autoConnect: () => Promise<void>;
   triggerBalanceRefresh: () => void;
 }
@@ -24,96 +40,100 @@ export const useWalletStore = create<WalletState>()(
       isConnecting: false,
       error: null,
       balanceRefreshTrigger: 0,
+
       setAddress: (address) => set({ address, error: null }),
 
-      connect: async (walletId: string) => {
+      // ── Connect: opens the kit's built-in multi-wallet modal ──────
+      connect: async () => {
+        ensureKitInit();
         set({ isConnecting: true, error: null });
         try {
-          const { requestAccess } = await import("@stellar/freighter-api");
-          const { address } = await requestAccess();
+          // authModal shows wallet picker → user selects → address returned
+          const { address } = await StellarWalletsKit.authModal();
           set({ address, isConnecting: false });
-          console.log("Connected to:", address);
+          console.log("Connected via StellarWalletsKit:", address);
         } catch (err) {
-          set({ isConnecting: false, error: err instanceof Error ? err.message : "Connection failed" });
-          console.error("Connection denied by user", err);
+          set({
+            isConnecting: false,
+            error: err instanceof Error ? err.message : "Connection failed",
+          });
+          console.error("Wallet connection failed", err);
         }
       },
 
+      // ── Disconnect: clears kit state + local storage ──────────────
       disconnect: () => {
+        StellarWalletsKit.disconnect();
         set({ address: null, error: null });
       },
 
+      // ── Sign: delegates XDR signing to whichever wallet module is active ──
       signTx: async (xdr: string, networkPassphrase: string): Promise<string> => {
+        ensureKitInit();
         try {
-          const { signTransaction } = await import("@stellar/freighter-api");
-          const result = await signTransaction(xdr, { networkPassphrase });
-          if (result.error) {
-            const msg = typeof result.error === "string"
-              ? result.error
-              : (result.error.message || "Signing failed");
-            if (/rejected|cancelled|canceled|denied/i.test(msg)) {
-              throw new Error("Wallet signing was cancelled.");
-            }
-            throw new Error(msg);
-          }
-          return result.signedTxXdr;
+          const { address } = get();
+          const { signedTxXdr } = await StellarWalletsKit.signTransaction(xdr, {
+            networkPassphrase,
+            address: address ?? undefined,
+          });
+          return signedTxXdr;
         } catch (err) {
-          if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/rejected|cancelled|canceled|denied|dismissed/i.test(msg)) {
+            throw new Error("Wallet signing was cancelled.");
+          }
+          if (err instanceof Error && !/rejected|cancelled|canceled|denied|dismissed/i.test(msg)) {
             console.error("Transaction signing failed:", err);
           }
           throw err;
         }
       },
 
-      signAndSend: async (tx: any) => {
-        const TESTNET = "Test SDF Network ; September 2015";
+      // ── Sign & Send: signs then submits via the Stellar SDK ───────
+      signAndSend: async (tx: { toXDR(): string }) => {
+        ensureKitInit();
         try {
-          const { signTransaction } = await import("@stellar/freighter-api");
-          const signResult = await signTransaction(tx.toXDR(), { networkPassphrase: TESTNET });
-
-          if (signResult.error) {
-            const msg = typeof signResult.error === "string"
-              ? signResult.error
-              : (signResult.error.message || "Signing failed");
-            if (/rejected|cancelled|canceled|denied/i.test(msg)) {
-              throw new Error("Wallet signing was cancelled.");
-            }
-            throw new Error(msg);
-          }
+          const { address } = get();
+          const { signedTxXdr } = await StellarWalletsKit.signTransaction(tx.toXDR(), {
+            networkPassphrase: Networks.TESTNET,
+            address: address ?? undefined,
+          });
 
           const { rpc, TransactionBuilder } = await import("@stellar/stellar-sdk");
-          const signedTx = TransactionBuilder.fromXDR(signResult.signedTxXdr, TESTNET);
-
+          const signedTx = TransactionBuilder.fromXDR(signedTxXdr, Networks.TESTNET);
           const server = new rpc.Server("https://soroban-testnet.stellar.org");
           const sendResult = await server.sendTransaction(signedTx);
-
           return sendResult;
         } catch (err) {
-          if (err instanceof Error && !/rejected|cancelled|canceled|denied|cancel/i.test(err.message)) {
+          const msg = err instanceof Error ? err.message : String(err);
+          if (/rejected|cancelled|canceled|denied|dismissed/i.test(msg)) {
+            throw new Error("Wallet signing was cancelled.");
+          }
+          if (err instanceof Error) {
             console.error("signAndSend failed:", err);
           }
           throw err;
         }
       },
 
-      triggerBalanceRefresh: () => set(s => ({ balanceRefreshTrigger: s.balanceRefreshTrigger + 1 })),
+      triggerBalanceRefresh: () =>
+        set((s) => ({ balanceRefreshTrigger: s.balanceRefreshTrigger + 1 })),
 
+      // ── Auto-connect: if kit already has a stored session, retrieve address ──
       autoConnect: async () => {
         if (typeof window === "undefined") return;
-
+        ensureKitInit();
         try {
-          const { isAllowed, getAddress } = await import("@stellar/freighter-api");
-          const allowed = await isAllowed();
-          if (allowed) {
-            const { address } = await getAddress();
-            set({ address: address || null, error: null });
-            console.log("Auto-connected to:", address);
+          const { address } = await StellarWalletsKit.getAddress();
+          if (address) {
+            set({ address, error: null });
+            console.log("Auto-connected via kit:", address);
           } else {
-            // Clear persisted address if no longer authorized
             set({ address: null, error: null });
           }
-        } catch (err) {
-          console.log("Auto-connect failed (user may not have Freighter installed or connected):", err);
+        } catch {
+          // Kit has no stored session — silently clear
+          set({ address: null, error: null });
         }
       },
     }),

@@ -26,8 +26,8 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className={`${mono.variable} ${sans.variable}`}>
-      <body className="scanlines grid-bg flex min-h-screen flex-col bg-[#0a0a0f] text-[#e8e8f0]">
+    <html lang="en" className={`${mono.variable} ${sans.variable}`} suppressHydrationWarning>
+      <body className="scanlines grid-bg flex min-h-screen flex-col bg-[#0a0a0f] text-[#e8e8f0]" suppressHydrationWarning>
         <Navbar />
         <WalletAutoConnect />
         <div className="flex min-h-screen flex-col">{children}</div>

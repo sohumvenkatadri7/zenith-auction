@@ -24,7 +24,7 @@ export default function MintPage() {
         <h1 className="text-2xl font-bold uppercase tracking-tight text-[#e8e8f0]">
           // MINT NFT
         </h1>
-        <p className="mt-1 text-xs text-[#6b6b80]">
+        <p className="mt-1 text-xs text-[#9898b0]">
           Upload an asset image, pin it to IPFS, and mint a Soroban NFT in one
           transaction.
         </p>

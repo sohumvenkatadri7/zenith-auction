@@ -49,7 +49,7 @@ export default function BidButton({
       {/* Input row */}
       <div className="flex flex-col gap-3 sm:flex-row sm:items-end">
         <label className="flex-1">
-          <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+          <span className="mb-1.5 block text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
             YOUR BID
             {minAmount && (
               <span className="ml-2 text-[#3b82f6]">

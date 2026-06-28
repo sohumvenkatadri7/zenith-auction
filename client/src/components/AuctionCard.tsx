@@ -84,25 +84,25 @@ export default function AuctionCard({ auction }: Props) {
       {/* Main Stats */}
       <div className="flex flex-1 flex-col gap-3 px-5 py-4">
         <div>
-          <p className="text-[10px] font-bold uppercase tracking-widest text-[#6b6b80]">CURRENT BID</p>
+          <p className="text-[10px] font-bold uppercase tracking-widest text-[#9898b0]">CURRENT BID</p>
           <p className="font-mono text-2xl font-black text-[#3b82f6]">{formatAmount(hasBids ? auction.highestBid : auction.startPrice)}</p>
         </div>
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">ASSET</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">ASSET</span>
             <span className="font-mono text-xs text-[#e8e8f0]">{truncate(auction.token)}</span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">BIDS</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">BIDS</span>
             <span className={"font-mono text-xs font-bold " + (bidCount > 0 ? "text-[#3b82f6]" : "text-[#6b6b80]")}>{bidCount}</span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">DURATION</span>
-            <span className="font-mono text-xs text-[#6b6b80]">{formatDuration(Math.max(0, auction.endTime - auction.startTime))}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">DURATION</span>
+            <span className="font-mono text-xs text-[#9898b0]">{formatDuration(Math.max(0, auction.endTime - auction.startTime))}</span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">BID TOKEN</span>
-            <span className="font-mono text-xs text-[#6b6b80]">{truncate(auction.bidToken)}</span>
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">BID TOKEN</span>
+            <span className="font-mono text-xs text-[#9898b0]">{truncate(auction.bidToken)}</span>
           </div>
         </div>
       </div>

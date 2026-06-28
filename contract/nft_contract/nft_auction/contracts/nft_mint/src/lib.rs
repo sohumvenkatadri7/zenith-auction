@@ -174,6 +174,44 @@ impl NonFungibleToken {
         Ok(())
     }
 
+    /// Admin override burn — allows the contract admin to destroy any token,
+    /// even if it is locked in an escrow/auction contract.
+    pub fn admin_burn(env: Env, admin: Address, token_id: i128) -> Result<(), NFTError> {
+        admin.require_auth();
+
+        // Verify the caller is the contract administrator
+        let stored_admin: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::Admin)
+            .ok_or(NFTError::NotInitialized)?;
+
+        if admin != stored_admin {
+            return Err(NFTError::NotAuthorized);
+        }
+
+        // Verify the token exists before burning
+        let current_owner: Address = env
+            .storage()
+            .instance()
+            .get(&DataKey::TokenOwner(token_id))
+            .ok_or(NFTError::TokenNotFound)?;
+
+        // Permanently erase the token state from the ledger
+        env.storage().instance().remove(&DataKey::TokenOwner(token_id));
+        env.storage().instance().remove(&DataKey::TokenUri(token_id));
+        env.storage().instance().remove(&DataKey::Approval(token_id));
+
+        // Stream real-time admin burn event on ledger
+        NFTBurned {
+            token_id,
+            owner: current_owner,
+        }
+        .publish(&env);
+
+        Ok(())
+    }
+
     /// FEATURE: BURN-TO-REDEEM
     /// Destroys the digital asset. Used when the physical item is claimed in the real world.
     pub fn burn(env: Env, from: Address, token_id: i128) -> Result<(), NFTError> {

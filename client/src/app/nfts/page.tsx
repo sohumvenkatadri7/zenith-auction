@@ -26,7 +26,7 @@ function timeAgo(ms: number): string {
   return `${d}d AGO`;
 }
 
-function NftCard({ nft, onDelete, onBurn }: { nft: MintedNft; onDelete?: () => void; onBurn?: () => void }) {
+function NftCard({ nft, onDelete, onBurn, onAdminBurn, isContractLocked }: { nft: MintedNft; onDelete?: () => void; onBurn?: () => void; onAdminBurn?: () => void; isContractLocked?: boolean }) {
   const router = useRouter();
   const [imgError, setImgError] = useState(false);
   const [confirming, setConfirming] = useState(false);
@@ -46,8 +46,8 @@ function NftCard({ nft, onDelete, onBurn }: { nft: MintedNft; onDelete?: () => v
           />
         ) : (
           <div className="flex flex-col items-center gap-2 p-6 text-center">
-            <span className="text-3xl text-[#6b6b80]">#</span>
-            <span className="font-mono text-[10px] text-[#6b6b80]">
+            <span className="text-3xl text-[#9898b0]">#</span>
+            <span className="font-mono text-[10px] text-[#9898b0]">
               IMAGE_UNAVAILABLE
             </span>
           </div>
@@ -89,7 +89,7 @@ function NftCard({ nft, onDelete, onBurn }: { nft: MintedNft; onDelete?: () => v
             {nft.title || "UNTITLED NFT"}
           </h3>
           {nft.description && (
-            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#6b6b80]">
+            <p className="mt-1 line-clamp-2 text-xs leading-relaxed text-[#9898b0]">
               {nft.description}
             </p>
           )}
@@ -98,18 +98,18 @@ function NftCard({ nft, onDelete, onBurn }: { nft: MintedNft; onDelete?: () => v
         {/* Metadata */}
         <div className="grid grid-cols-2 gap-2">
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
               MINTED
             </span>
-            <span className="font-mono text-xs text-[#6b6b80]">
+            <span className="font-mono text-xs text-[#9898b0]">
               {timeAgo(nft.mintedAt)}
             </span>
           </div>
           <div className="flex flex-col">
-            <span className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+            <span className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
               TOKEN
             </span>
-            <span className="font-mono text-xs text-[#6b6b80]">
+            <span className="font-mono text-xs text-[#9898b0]">
               {truncate(nft.tokenId)}
             </span>
           </div>
@@ -143,7 +143,28 @@ function NftCard({ nft, onDelete, onBurn }: { nft: MintedNft; onDelete?: () => v
           >
             VIEW ON IPFS &rarr;
           </a>
-          {onBurn && (
+          {onAdminBurn && isContractLocked && (
+            <button
+              onClick={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                if (burnConfirming) {
+                  onAdminBurn();
+                } else {
+                  setBurnConfirming(true);
+                  setTimeout(() => setBurnConfirming(false), 3000);
+                }
+              }}
+              className={`flex items-center justify-center border-2 px-4 py-2 text-[10px] font-bold uppercase tracking-wider transition ${
+                burnConfirming
+                  ? "border-[#ef4444] bg-[#ef4444]/20 text-[#ef4444]"
+                  : "border-[#eab308] bg-[#0e0e16] text-[#eab308] hover:border-[#ef4444] hover:text-[#ef4444]"
+              }`}
+            >
+              {burnConfirming ? "CONFIRM ADMIN BURN?" : "FORCE ADMIN BURN"}
+            </button>
+          )}
+          {onBurn && !isContractLocked && (
             <button
               onClick={(e) => {
                 e.preventDefault();
@@ -219,8 +240,9 @@ export default function NftsPage() {
   const { address } = useWalletStore();
   const { nfts } = useNftStore();
   const { onChainNfts, isLoading: onChainLoading, error: onChainError, refresh } = useNftGallery();
-  const { burnNft } = useNftMint();
+  const { burnNft, adminBurnNft } = useNftMint();
 
+  // Standard burn — user owns the NFT directly
   const handleBurn = useCallback(async (tokenId: string) => {
     try {
       await burnNft(tokenId);
@@ -229,6 +251,16 @@ export default function NftsPage() {
       console.error("Burn failed:", err);
     }
   }, [burnNft, refresh]);
+
+  // Admin burn — NFT is locked in a contract (owner address starts with "C")
+  const handleAdminBurn = useCallback(async (tokenId: string) => {
+    try {
+      await adminBurnNft(tokenId);
+      refresh();
+    } catch (err) {
+      console.error("Admin burn failed:", err);
+    }
+  }, [adminBurnNft, refresh]);
 
   const myLocalNfts = address
     ? nfts.filter((n) => n.owner === address)
@@ -257,7 +289,7 @@ export default function NftsPage() {
             <h1 className="text-2xl font-bold uppercase tracking-tight text-[#e8e8f0]">
               // MY NFTS
             </h1>
-            <p className="mt-1 text-xs text-[#6b6b80]">
+            <p className="mt-1 text-xs text-[#9898b0]">
               {displayNfts.length} NFT{displayNfts.length !== 1 ? "s" : ""} found
               on this wallet
             </p>
@@ -275,7 +307,7 @@ export default function NftsPage() {
       {onChainLoading && displayNfts.length === 0 && (
         <section className="flex items-center justify-center gap-3 p-12">
           <span className="inline-block h-4 w-4 animate-spin border-2 border-[#44445a] border-t-[#3b82f6]" />
-          <span className="text-xs font-bold uppercase text-[#6b6b80]">
+          <span className="text-xs font-bold uppercase text-[#9898b0]">
             Scanning on-chain NFTs...
           </span>
         </section>
@@ -294,13 +326,13 @@ export default function NftsPage() {
       {displayNfts.length > 0 ? (
         <section>
           <div className="mb-4 flex items-center justify-between">
-            <h2 className="text-xs font-bold uppercase tracking-widest text-[#44445a]">
+            <h2 className="text-xs font-bold uppercase tracking-widest text-[#c8c8d8]">
               // ALL NFTS
             </h2>
             <button
               onClick={refresh}
               disabled={onChainLoading}
-              className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#3b82f6] hover:text-[#3b82f6] disabled:opacity-50"
+              className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#3b82f6] hover:text-[#3b82f6] disabled:opacity-50"
             >
               {onChainLoading ? "SCANNING..." : "REFRESH"}
             </button>
@@ -316,16 +348,18 @@ export default function NftsPage() {
                     : undefined
                 }
                 onBurn={() => handleBurn(nft.tokenId)}
+                onAdminBurn={() => handleAdminBurn(nft.tokenId)}
+                isContractLocked={nft.owner.startsWith("C")}
               />
             ))}
           </div>
         </section>
       ) : !onChainLoading ? (
         <section className="flex flex-col items-center gap-4 border-2 border-dashed border-[#1e1e2e] bg-[#0e0e16] p-16 text-center">
-          <p className="font-mono text-xs text-[#44445a]">
+          <p className="font-mono text-xs text-[#9898b0]">
             NO_NFTS_FOUND
           </p>
-          <p className="text-sm font-bold text-[#6b6b80]">
+          <p className="text-sm font-bold text-[#9898b0]">
             You haven&apos;t minted any NFTs yet.
           </p>
           <Link

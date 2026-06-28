@@ -34,7 +34,7 @@ export default function Home() {
               <span className="h-2.5 w-2.5 bg-[#ef4444]" />
               <span className="h-2.5 w-2.5 bg-[#eab308]" />
               <span className="h-2.5 w-2.5 bg-[#22c55e]" />
-              <span className="ml-4 font-mono text-xs text-[#44445a]">
+              <span className="ml-4 font-mono text-xs text-[#9898b0]">
                 zenith@stellar:~$
               </span>
             </div>
@@ -53,7 +53,7 @@ export default function Home() {
               </h1>
 
               {/* Sub */}
-              <p className="animate-fade-up-2 max-w-lg text-sm leading-relaxed text-[#6b6b80]">
+              <p className="animate-fade-up-2 max-w-lg text-sm leading-relaxed text-[#9898b0]">
                 Trustless auctions powered by Soroban smart contracts.
                 <br />
                 Create. Bid. Settle. No intermediaries.
@@ -76,7 +76,7 @@ export default function Home() {
               </button>
 
               {/* Updated helper text for multi-wallet */}
-              <p className="animate-fade-up-4 text-xs text-[#44445a]">
+              <p className="animate-fade-up-4 text-xs text-[#9898b0]">
                 supports freighter, xbull & albedo
               </p>
             </div>
@@ -114,7 +114,7 @@ export default function Home() {
                   <h3 className="text-sm font-bold uppercase tracking-wider text-[#e8e8f0]">
                     {f.title}
                   </h3>
-                  <p className="text-xs leading-relaxed text-[#6b6b80]">
+                  <p className="text-xs leading-relaxed text-[#9898b0]">
                     {f.desc}
                   </p>
                 </div>
@@ -142,7 +142,7 @@ export default function Home() {
             <h1 className="text-2xl font-bold uppercase tracking-tight text-[#e8e8f0]">
               // LIVE AUCTIONS
             </h1>
-            <p className="mt-1 text-xs text-[#6b6b80]">
+            <p className="mt-1 text-xs text-[#9898b0]">
               {auctions.length} auction{auctions.length !== 1 ? "s" : ""} found
             </p>
           </div>
@@ -168,7 +168,7 @@ export default function Home() {
       {isLoading && !hasLoaded && (
         <div className="flex items-center justify-center gap-3 p-12">
           <span className="inline-block h-4 w-4 animate-spin border-2 border-[#44445a] border-t-[#3b82f6]" />
-          <span className="text-xs font-bold uppercase text-[#6b6b80]">
+          <span className="text-xs font-bold uppercase text-[#9898b0]">
             Loading...
           </span>
         </div>
@@ -177,7 +177,7 @@ export default function Home() {
       {/* Auction grid */}
       {hasLoaded && auctions.length > 0 && (
         <section>
-          <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-[#44445a]">
+          <h2 className="mb-4 text-xs font-bold uppercase tracking-widest text-[#c8c8d8]">
             // ALL AUCTIONS
           </h2>
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -193,10 +193,10 @@ export default function Home() {
       {/* Empty */}
       {hasLoaded && auctions.length === 0 && (
         <section className="flex flex-col items-center gap-4 border-2 border-dashed border-[#1e1e2e] bg-[#0e0e16] p-16 text-center">
-          <p className="font-mono text-xs text-[#44445a]">
+          <p className="font-mono text-xs text-[#9898b0]">
             NO_AUCTIONS_FOUND
           </p>
-          <p className="text-sm font-bold text-[#6b6b80]">
+          <p className="text-sm font-bold text-[#9898b0]">
             No auctions yet. Create the first one.
           </p>
           <Link

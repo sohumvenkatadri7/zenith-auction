@@ -76,6 +76,13 @@ pub struct AuctionReclaimed {
     pub token_id: i128,
 }
 
+#[contractevent]
+pub struct AuctionCancelled {
+    pub auction_id: u64,
+    pub creator: Address,
+    pub token_id: i128,
+}
+
 #[contract]
 pub struct Contract;
 
@@ -275,6 +282,43 @@ impl Contract {
             token_id: auction.token_id,
         }.publish(&env);
         
+        Ok(())
+    }
+
+    /// Cancel an auction and reclaim the NFT if no bids have been placed.
+    /// Only the creator can cancel; panics if any bids exist.
+    pub fn cancel_auction(env: Env, auction_id: u64) -> Result<(), AuctionError> {
+        let mut auction: Auction = env
+            .storage()
+            .instance()
+            .get(&DataKey::Auction(auction_id))
+            .ok_or(AuctionError::NotFound)?;
+
+        // Only the original creator may cancel
+        auction.creator.require_auth();
+
+        // Cannot cancel if bids have been placed — protects bidders
+        if auction.highest_bid > 0 {
+            return Err(AuctionError::HasBids);
+        }
+
+        // Transfer the NFT back from the contract to the creator
+        token::Client::new(&env, &auction.token).transfer(
+            &env.current_contract_address(),
+            &auction.creator,
+            &auction.token_id,
+        );
+
+        // Clean up: remove auction from storage
+        env.storage().instance().remove(&DataKey::Auction(auction_id));
+
+        AuctionCancelled {
+            auction_id,
+            creator: auction.creator,
+            token_id: auction.token_id,
+        }
+        .publish(&env);
+
         Ok(())
     }
 

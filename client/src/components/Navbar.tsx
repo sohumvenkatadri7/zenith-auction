@@ -5,16 +5,17 @@ import { useState, useEffect } from "react";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuction } from "@/hooks/useAuction";
 import { DEFAULT_BID_TOKEN } from "@/lib/constants";
-import WalletModal from "./WalletModal";
-
 export default function Navbar() {
   const { address, isConnecting, error, disconnect, balanceRefreshTrigger } = useWalletStore();
+  const connect = useWalletStore((s) => s.connect);
   const { getTokenBalance } = useAuction();
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false);
   const [tokenBalance, setTokenBalance] = useState<string | null>(null);
 
-  // Fetch and display connected user's token balance
+  // ── Part 3: Balance tracking on wallet connection ────────────────────
+  // When address transitions to connected, fetch token balance and
+  // keep it fresh every 15 seconds. The `balanceRefreshTrigger` signal
+  // forces an immediate re-fetch after any successful transaction.
   useEffect(() => {
     if (!address) {
       setTokenBalance(null);
@@ -41,7 +42,7 @@ export default function Navbar() {
 
   return (
     <header className="sticky top-0 z-50 border-b-2 border-[#1e1e2e] bg-[#0a0a0f]">
-      <div className="mx-auto flex max-w-6xl items-center justify-between px-6 py-3">
+      <div className="mx-auto flex max-w-6xl items-center justify-between px-4 py-3 sm:px-6">
         {/* Brand */}
         <Link href="/" className="flex items-center gap-2 transition hover:opacity-80">
           <span className="border-2 border-[#3b82f6] bg-[#3b82f6]/10 px-1.5 py-0.5 text-xs font-bold text-[#3b82f6]">
@@ -56,7 +57,7 @@ export default function Navbar() {
         <nav className="hidden items-center gap-1 sm:flex">
           <Link
             href="/"
-            className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+            className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
           >
             EXPLORE
           </Link>
@@ -64,19 +65,19 @@ export default function Navbar() {
             <>
               <Link
                 href="/create"
-                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
               >
                 + CREATE
               </Link>
               <Link
                 href="/nfts"
-                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
               >
                 MY NFTS
               </Link>
               <Link
                 href="/mint"
-                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
+                className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#1e1e2e] hover:text-[#e8e8f0]"
               >
                 MINT NFT
               </Link>
@@ -94,29 +95,31 @@ export default function Navbar() {
 
           {address ? (
             <div className="flex items-center gap-3">
-              {/* Token Balance Badge */}
-              {tokenBalance !== null && (
-                <div className="hidden items-center gap-1.5 border-2 border-[#22c55e] bg-[#22c55e]/10 px-3 py-1 sm:flex">
-                  <span className="text-[10px] font-bold uppercase text-[#22c55e]">XLM</span>
-                  <span className="font-mono text-xs font-bold text-[#e8e8f0]">{tokenBalance}</span>
-                </div>
-              )}
+              {/* Token Balance + Address — balance badge alongside truncated key */}
               <div className="hidden items-center gap-2 border-2 border-[#1e1e2e] bg-[#0e0e16] px-3 py-1 sm:flex">
+                {tokenBalance !== null && (
+                  <span className="font-mono text-[10px] font-bold text-[#22c55e]">
+                    {tokenBalance}
+                  </span>
+                )}
+                {tokenBalance !== null && (
+                  <span className="text-[#1e1e2e]">|</span>
+                )}
                 <span className="live-dot" />
-                <span className="text-xs text-[#6b6b80]">
+                <span className="text-xs text-[#9898b0]">
                   {truncate(address)}
                 </span>
               </div>
               <button
                 onClick={disconnect}
-                className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#6b6b80] transition hover:border-[#ef4444] hover:text-[#ef4444]"
+                className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-3 py-1.5 text-[10px] font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#ef4444] hover:text-[#ef4444]"
               >
                 DISCONNECT
               </button>
             </div>
           ) : (
             <button
-              onClick={() => setIsModalOpen(true)}
+              onClick={connect}
               disabled={isConnecting}
               className="border-2 border-[#3b82f6] bg-[#3b82f6] px-4 py-1.5 text-[10px] font-bold uppercase tracking-wider text-white shadow-[3px_3px_0px_0px_#1e40af] transition hover:translate-x-[-1px] hover:translate-y-[-1px] hover:shadow-[4px_4px_0px_0px_#1e40af] disabled:opacity-60"
             >
@@ -150,7 +153,7 @@ export default function Navbar() {
             <Link
               href="/"
               onClick={() => setMobileOpen(false)}
-              className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80]"
+              className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#9898b0]"
             >
               EXPLORE
             </Link>
@@ -166,14 +169,14 @@ export default function Navbar() {
                 <Link
                   href="/nfts"
                   onClick={() => setMobileOpen(false)}
-                  className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80]"
+                  className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#9898b0]"
                 >
                   MY NFTS
                 </Link>
                 <Link
                   href="/mint"
                   onClick={() => setMobileOpen(false)}
-                  className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#6b6b80]"
+                  className="border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#9898b0]"
                 >
                   MINT NFT
                 </Link>
@@ -188,11 +191,6 @@ export default function Navbar() {
         </div>
       )}
 
-      {/* Mount the Multi-Wallet Modal */}
-      <WalletModal 
-        isOpen={isModalOpen} 
-        onClose={() => setIsModalOpen(false)} 
-      />
     </header>
   );
 }

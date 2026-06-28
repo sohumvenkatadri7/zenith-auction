@@ -297,6 +297,11 @@ export function useAuction() {
     return submitTx("reclaim_unsold", [nativeToScVal(auctionId, { type: "u64" })]);
   }, [submitTx]);
 
+  // ── CANCEL AUCTION (new) ────────────────────────────────────────
+  const cancelAuction = useCallback(async (auctionId: bigint): Promise<string> => {
+    return submitTx("cancel_auction", [nativeToScVal(auctionId, { type: "u64" })]);
+  }, [submitTx]);
+
   const getTokenBalance = useCallback(async (tokenAddress: string, holderAddress: string): Promise<bigint | null> => {
       const server = getServer();
       if (!server) return null;
@@ -312,5 +317,23 @@ export function useAuction() {
       } catch { return null; }
   }, []);
 
-  return { createAuction, fetchAllAuctions, getAuctionDetails, placeBid, claimWinning, reclaimUnsold, getTokenBalance };
+  // ── GET NEXT AUCTION ID ──────────────────────────────────────────
+  const getNextId = useCallback(async (): Promise<number> => {
+    const server = getServer();
+    const contract = getAuctionContract();
+    if (!server || !contract) return 1;
+    try {
+      const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+      const tx = new TransactionBuilder(dummySource, { fee: BASE_FEE, networkPassphrase: NETWORK.networkPassphrase })
+        .addOperation(contract.call("get_next_id"))
+        .setTimeout(30)
+        .build();
+      const sim = await server.simulateTransaction(tx);
+      return "result" in sim && sim.result?.retval ? Number(scValToNative(sim.result.retval)) : 1;
+    } catch {
+      return 1;
+    }
+  }, []);
+
+  return { createAuction, fetchAllAuctions, getAuctionDetails, placeBid, claimWinning, reclaimUnsold, cancelAuction, getTokenBalance, getNextId };
 }

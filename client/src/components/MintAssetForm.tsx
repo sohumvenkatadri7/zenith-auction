@@ -182,7 +182,7 @@ export default function MintAssetForm() {
                         ? "border-[#3b82f6] bg-[#3b82f6]/10 text-[#3b82f6] animate-pulse-ring"
                         : status === "error"
                           ? "border-[#ef4444] bg-[#ef4444]/10 text-[#ef4444]"
-                          : "border-[#1e1e2e] bg-[#0e0e16] text-[#44445a]"
+                          : "border-[#1e1e2e] bg-[#0e0e16] text-[#9898b0]"
                   }`}
                 >
                   {status === "done" ? "✔" : status === "active" ? "..." : step.label[0]}
@@ -190,7 +190,7 @@ export default function MintAssetForm() {
                 <div className="hidden flex-col sm:flex">
                   <span
                     className={`text-[10px] font-bold uppercase tracking-widest ${
-                      status === "active" ? "text-[#3b82f6]" : status === "done" ? "text-[#22c55e]" : "text-[#44445a]"
+                      status === "active" ? "text-[#3b82f6]" : status === "done" ? "text-[#22c55e]" : "text-[#9898b0]"
                     }`}
                   >
                     {step.label}
@@ -275,10 +275,10 @@ export default function MintAssetForm() {
                     </svg>
                   </div>
                   <div>
-                    <p className="text-xs font-bold uppercase tracking-wider text-[#6b6b80]">
+                    <p className="text-xs font-bold uppercase tracking-wider text-[#9898b0]">
                       DRAG & DROP ASSET IMAGE
                     </p>
-                    <p className="mt-1 text-[10px] text-[#44445a]">
+                    <p className="mt-1 text-[10px] text-[#9898b0]">
                       PNG, JPEG, WEBP, GIF — MAX {MAX_SIZE_MB} MB
                     </p>
                   </div>
@@ -293,11 +293,11 @@ export default function MintAssetForm() {
                   <span className="text-[10px] font-bold uppercase tracking-widest text-[#22c55e]">
                     ✔ FILE READY
                   </span>
-                  <span className="text-[10px] text-[#6b6b80]">
+                  <span className="text-[10px] text-[#9898b0]">
                     {form.file.name}
                   </span>
                 </div>
-                <span className="font-mono text-[10px] text-[#44445a]">
+                <span className="font-mono text-[10px] text-[#9898b0]">
                   {formatSize(form.file.size)}
                 </span>
               </div>
@@ -307,7 +307,7 @@ export default function MintAssetForm() {
           {/* Right: Metadata fields */}
           <div className="flex flex-1 flex-col gap-5">
             <div>
-              <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
                 TITLE *
               </label>
               <input
@@ -321,13 +321,13 @@ export default function MintAssetForm() {
                 className={inputClass}
                 maxLength={64}
               />
-              <p className="mt-1 text-[10px] text-[#44445a]">
+              <p className="mt-1 text-[10px] text-[#9898b0]">
                 {form.title.length}/64 CHARACTERS
               </p>
             </div>
 
             <div>
-              <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+              <label className="mb-2 block text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
                 DESCRIPTION
               </label>
               <textarea
@@ -341,14 +341,14 @@ export default function MintAssetForm() {
                 maxLength={500}
                 className={`${inputClass} resize-none`}
               />
-              <p className="mt-1 text-[10px] text-[#44445a]">
+              <p className="mt-1 text-[10px] text-[#9898b0]">
                 {form.description.length}/500 CHARACTERS
               </p>
             </div>
 
             {/* IPFS info box */}
             <div className="border-2 border-[#1e1e2e] bg-[#0e0e16] p-4">
-              <p className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+              <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
                 WHAT HAPPENS NEXT
               </p>
               <ul className="mt-2 flex flex-col gap-1.5">
@@ -361,7 +361,7 @@ export default function MintAssetForm() {
                 ].map((step) => (
                   <li key={step} className="flex items-start gap-2">
                     <span className="mt-0.5 text-[#3b82f6]">&gt;</span>
-                    <span className="text-[10px] text-[#6b6b80]">{step}</span>
+                    <span className="text-[10px] text-[#9898b0]">{step}</span>
                   </li>
                 ))}
               </ul>
@@ -421,7 +421,7 @@ export default function MintAssetForm() {
 
             <div className="grid gap-2 sm:grid-cols-2">
               <div className="border-2 border-[#1e1e2e] bg-[#0a0a0f] p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
                   TOKEN ID
                 </p>
                 <p className="mt-1 truncate font-mono text-xs text-[#3b82f6]">
@@ -429,7 +429,7 @@ export default function MintAssetForm() {
                 </p>
               </div>
               <div className="border-2 border-[#1e1e2e] bg-[#0a0a0f] p-3">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
                   TX HASH
                 </p>
                 <p className="mt-1 truncate font-mono text-xs text-[#3b82f6]">
@@ -437,7 +437,7 @@ export default function MintAssetForm() {
                 </p>
               </div>
               <div className="border-2 border-[#1e1e2e] bg-[#0a0a0f] p-3 sm:col-span-2">
-                <p className="text-[10px] font-bold uppercase tracking-widest text-[#44445a]">
+                <p className="text-[10px] font-bold uppercase tracking-widest text-[#c8c8d8]">
                   METADATA URI
                 </p>
                 <p className="mt-1 break-all font-mono text-xs text-[#3b82f6]">

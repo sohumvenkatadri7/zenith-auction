@@ -16,6 +16,7 @@ import {
   nativeToScVal,
   scValToNative,
   Address,
+  Account,
 } from "@stellar/stellar-sdk";
 
 const { Server, assembleTransaction } = rpc;
@@ -52,6 +53,7 @@ interface UseNftMintReturn {
   error: string | null;
   mint: (title: string, description: string, file: File) => Promise<MintResult>;
   burnNft: (tokenId: string) => Promise<string>;
+  adminBurnNft: (tokenId: string) => Promise<string>;
   initializeContract: () => Promise<string>;
   reset: () => void;
 }
@@ -84,6 +86,18 @@ function parseLedgerError(raw: string): string {
     return "INSUFFICIENT FUNDS FOR TRANSACTION FEE.";
   if (err.includes("SIMULATIONFAILED"))
     return "SIMULATION FAILED: THE CONTRACT REJECTED THIS MINT.";
+
+  // Decode NFT contract error codes: Error(Contract, #N)
+  const contractMatch = err.match(/ERROR\(CONTRACT,\s*#(\d+)\)/);
+  if (contractMatch) {
+    const code = parseInt(contractMatch[1], 10);
+    switch (code) {
+      case 1: return "NOT AUTHORIZED: YOU DO NOT OWN THIS NFT.";
+      case 2: return "NFT NOT FOUND: THIS TOKEN ID DOES NOT EXIST IN THE CONTRACT.";
+      case 3: return "TOKEN ALREADY EXISTS.";
+      case 4: return "NFT CONTRACT NOT INITIALIZED.";
+    }
+  }
 
   return "TRANSACTION FAILED: CHECK CONSOLE FOR DETAILS.";
 }
@@ -273,9 +287,15 @@ export function useNftMint(): UseNftMintReturn {
         const sim = await server.simulateTransaction(tx);
 
         if ("error" in sim) {
-          throw new Error(
-            `Simulation failed: ${String((sim as { error?: unknown }).error)}`,
-          );
+          const simErr = String((sim as { error?: unknown }).error ?? "");
+          // ── PATCHED: Map raw Rust host errors to clean messages ──
+          if (simErr.includes("Contract, #2")) {
+            throw new Error("Transaction Rejected: You are not the current owner of this NFT or it is locked in escrow.");
+          }
+          if (simErr.includes("Contract, #1")) {
+            throw new Error("Transaction Rejected: Unauthorized administrative action.");
+          }
+          throw new Error(`Simulation failed: ${simErr}`);
         }
 
         let expectedTokenId = "0";
@@ -287,8 +307,10 @@ export function useNftMint(): UseNftMintReturn {
           }
         }
 
-        const assembled = assembleTransaction(tx, sim);
-        const preparedTx = assembled.build();
+        // ── PATCHED: Use prepareTransaction to inject Soroban resource footprints ──
+        // This replaces the manual assembleTransaction + build pattern and ensures
+        // restore_preamble / resource leeway are injected by the RPC server.
+        const preparedTx = await server.prepareTransaction(tx);
 
         // ── Step 4: Sign via Freighter ──────────────────────────
         const signedXdr = await signTx(
@@ -359,13 +381,19 @@ export function useNftMint(): UseNftMintReturn {
             : "AN UNKNOWN ERROR OCCURRED.";
         setError(message);
 
-        // FIX: Deep JSON logging to extract the real reason Soroban rejected it
+        // ── PATCHED: Deep Axios / Horizon error logging ──
         if (err instanceof Error) {
           console.error("RAW NFT MINT ERROR MESSAGE:", err.message);
         }
-        
+        // Surface Axios-style network errors (e.g. tx_bad_seq from Horizon)
+        if (err?.response?.data) {
+          console.error("HORIZON RESPONSE DATA:", JSON.stringify(err.response.data, null, 2));
+          if (err.response.data?.extras?.result_codes) {
+            console.error("HORIZON RESULT CODES:", JSON.stringify(err.response.data.extras.result_codes, null, 2));
+          }
+        }
         if (typeof err === 'object' && err !== null) {
-           console.error("DETAILED ERROR OBJECT:", JSON.stringify(err, null, 2));
+          console.error("DETAILED ERROR OBJECT:", JSON.stringify(err, null, 2));
         }
 
         throw err;
@@ -385,29 +413,66 @@ export function useNftMint(): UseNftMintReturn {
     setPhase("confirming");
     setError(null);
 
+    // ── Pre-flight: verify user actually owns the NFT before attempting burn ──
     try {
-      const source = await server.getAccount(caller);
-      const tx = new TransactionBuilder(source, {
-        fee: BASE_FEE,
-        networkPassphrase: NETWORK.networkPassphrase,
-      })
-        .addOperation(
-          contract.call(
-            "burn",
-            new Address(caller).toScVal(),
-            nativeToScVal(tokenId, { type: "i128" }),
-          ),
-        )
-        .setTimeout(30)
-        .build();
+  const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+  const ownerTx = new TransactionBuilder(dummySource, { 
+    fee: BASE_FEE, 
+    networkPassphrase: NETWORK.networkPassphrase 
+  })
+    .addOperation(contract.call("owner_of", nativeToScVal(BigInt(tokenId), { type: "i128" })))
+    .setTimeout(30)
+    .build();
+
+  const ownerSim = await server.simulateTransaction(ownerTx);
+  
+  if ("result" in ownerSim && ownerSim.result?.retval) {
+    // ── FOOLPROOF ADDRESS PARSING ──
+    // Do not rely on scValToNative for strict string equality checks on Addresses.
+    // Use Address.fromScVal to guarantee a clean, standardized public key string.
+    const ownerAddr = Address.fromScVal(ownerSim.result.retval).toString();
+    
+    // Normalize both strings to lowercase to prevent casing mismatches
+    if (ownerAddr.toLowerCase() !== caller.toLowerCase()) {
+      throw new Error(`NOT AUTHORIZED: YOU DO NOT OWN THIS NFT. Owner is ${ownerAddr}, you are ${caller}.`);
+    }
+  }
+} catch (preErr: any) {
+  if (preErr?.message?.includes("NOT AUTHORIZED")) throw preErr;
+  // If owner_of fails entirely (e.g. token doesn't exist), fall through to burn for the real contract error
+}
+
+try {
+  const source = await server.getAccount(caller);
+  const tx = new TransactionBuilder(source, {
+    fee: BASE_FEE,
+    networkPassphrase: NETWORK.networkPassphrase,
+  })
+    .addOperation(
+      contract.call(
+        "burn",
+        new Address(caller).toScVal(),
+        nativeToScVal(BigInt(tokenId), { type: "i128" }),
+      ),
+    )
+    .setTimeout(30)
+    .build();
 
       const sim = await server.simulateTransaction(tx);
       if ("error" in sim) {
-        throw new Error(`Burn simulation failed: ${String((sim as { error?: unknown }).error)}`);
+        const simErr = String((sim as { error?: unknown }).error ?? "");
+        // ── PATCHED: Map raw Rust host errors to clean messages ──
+        if (simErr.includes("Contract, #2")) {
+          throw new Error("Transaction Rejected: You are not the current owner of this NFT or it is locked in escrow.");
+        }
+        if (simErr.includes("Contract, #1")) {
+          throw new Error("Transaction Rejected: Unauthorized administrative action.");
+        }
+        throw new Error(`Burn simulation failed: ${simErr}`);
       }
 
-      const assembled = assembleTransaction(tx, sim);
-      const preparedTx = assembled.build();
+      // ── PATCHED: Use prepareTransaction for Soroban resource footprints ──
+      const preparedTx = await server.prepareTransaction(tx);
       const signedXdr = await signTx(preparedTx.toXDR(), NETWORK.networkPassphrase);
 
       const sendResult = await server.sendTransaction(
@@ -446,6 +511,106 @@ export function useNftMint(): UseNftMintReturn {
     }
   }, [address, signTx]);
 
+  // ── ADMIN BURN (forced burn for contract-locked NFTs) ───────────
+  const adminBurnNft = useCallback(async (tokenId: string): Promise<string> => {
+    const caller = address;
+    if (!caller) throw new Error("Wallet not connected");
+
+    const server = getServer();
+    const contract = getNftContract();
+    if (!server || !contract) throw new Error("Soroban RPC or NFT contract not configured");
+
+    setPhase("confirming");
+    setError(null);
+
+    try {
+      // Verify the NFT exists before calling admin_burn
+      const dummySource = new Account("GAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAWHF", "0");
+      const ownerTx = new TransactionBuilder(dummySource, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK.networkPassphrase,
+      })
+        .addOperation(contract.call("owner_of", nativeToScVal(BigInt(tokenId), { type: "i128" })))
+        .setTimeout(30)
+        .build();
+
+      const ownerSim = await server.simulateTransaction(ownerTx);
+
+      // If the token doesn't exist at all, let the contract return the real error
+      let tokenOwner = "unknown";
+      if ("result" in ownerSim && ownerSim.result?.retval) {
+        tokenOwner = Address.fromScVal(ownerSim.result.retval).toString();
+      }
+
+      // Build the admin_burn transaction
+      const source = await server.getAccount(caller);
+      const tx = new TransactionBuilder(source, {
+        fee: BASE_FEE,
+        networkPassphrase: NETWORK.networkPassphrase,
+      })
+        .addOperation(
+          contract.call(
+            "admin_burn",
+            new Address(caller).toScVal(),
+            nativeToScVal(BigInt(tokenId), { type: "i128" }),
+          ),
+        )
+        .setTimeout(30)
+        .build();
+
+      const sim = await server.simulateTransaction(tx);
+      if ("error" in sim) {
+        const simErr = String((sim as { error?: unknown }).error ?? "");
+        // ── PATCHED: Map raw Rust host errors to clean messages ──
+        if (simErr.includes("Contract, #2")) {
+          throw new Error("Transaction Rejected: You are not the current owner of this NFT or it is locked in escrow.");
+        }
+        if (simErr.includes("Contract, #1")) {
+          throw new Error("Transaction Rejected: Unauthorized administrative action.");
+        }
+        throw new Error(`Admin burn simulation failed: ${simErr}`);
+      }
+
+      // ── PATCHED: Use prepareTransaction for Soroban resource footprints ──
+      const preparedTx = await server.prepareTransaction(tx);
+      const signedXdr = await signTx(preparedTx.toXDR(), NETWORK.networkPassphrase);
+
+      const sendResult = await server.sendTransaction(
+        TransactionBuilder.fromXDR(signedXdr, NETWORK.networkPassphrase),
+      );
+
+      if (sendResult.status !== "PENDING") {
+        throw new Error(`Send returned unexpected status: ${sendResult.status}`);
+      }
+
+      const txResult = await server.pollTransaction(sendResult.hash, { attempts: 30 });
+      if (txResult.status !== "SUCCESS") {
+        let detail = "no result available";
+        if ("resultXdr" in txResult && txResult.resultXdr) {
+          detail = typeof txResult.resultXdr === "object"
+            ? JSON.stringify(txResult.resultXdr)
+            : String(txResult.resultXdr);
+        }
+        throw new Error(`Admin burn failed: ${txResult.status} — ${detail}`);
+      }
+
+      // Remove from local store
+      useNftStore.getState().removeNft(tokenId);
+
+      setPhase("success");
+      return txResult.txHash;
+    } catch (err: any) {
+      setPhase("error");
+      const message =
+        err instanceof Error
+          ? parseLedgerError(err.message)
+          : "AN UNKNOWN ERROR OCCURRED.";
+      setError(message);
+      console.error("RAW ADMIN BURN ERROR:", err.message);
+      throw err;
+    }
+  }, [address, signTx]);
+
   return {
     phase,
     phaseLabel: PHASE_LABELS[phase],
@@ -453,6 +618,7 @@ export function useNftMint(): UseNftMintReturn {
     error,
     mint,
     burnNft,
+    adminBurnNft,
     initializeContract,
     reset,
   };
