@@ -6,15 +6,15 @@ import { useWalletStore } from "@/store/walletStore";
 import { useAuctionStore } from "@/store/auctionStore";
 import { useAuction } from "@/hooks/useAuction";
 import AuctionCard from "@/components/AuctionCard";
-import WalletModal from "@/components/WalletModal"; // <-- Import the modal
+
 
 export default function Home() {
-  const { address, isConnecting } = useWalletStore(); // Removed 'connect'
+  const { address, isConnecting } = useWalletStore();
+  const connect = useWalletStore((s) => s.connect);
   const { auctions, isLoading, error } = useAuctionStore();
   const { fetchAllAuctions } = useAuction();
   
   const [hasLoaded, setHasLoaded] = useState(false);
-  const [isModalOpen, setIsModalOpen] = useState(false); // <-- Add modal state
 
   useEffect(() => {
     if (address) {
@@ -61,7 +61,7 @@ export default function Home() {
 
               {/* CTA */}
               <button
-                onClick={() => setIsModalOpen(true)} // <-- Open modal instead of direct connect
+                onClick={() => connect()} // <-- Direct connect via Stellar Wallets Kit
                 disabled={isConnecting}
                 className="animate-fade-up-3 mt-2 border-2 border-[#3b82f6] bg-[#3b82f6] px-8 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-brutal-accent transition hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-brutal-accent-lg disabled:opacity-60"
               >
@@ -122,12 +122,7 @@ export default function Home() {
             </div>
           </section>
         </main>
-        
-        {/* Mount the Multi-Wallet Modal here */}
-        <WalletModal 
-          isOpen={isModalOpen} 
-          onClose={() => setIsModalOpen(false)} 
-        />
+
       </>
     );
   }
