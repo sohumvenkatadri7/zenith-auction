@@ -373,7 +373,7 @@ graph TB
 ### Home — Live Auction Feed
 
 <p align="center">
-  <img src="screenshots/home-feed.png" alt="Home page showing live auction cards with countdown timers" width="800" />
+ <img width="1918" height="933" alt="Home page showing live auction cards with countdown timers" src="https://github.com/user-attachments/assets/3d0f2c5f-efa8-41db-ad97-51fa87c57cd5" />
 </p>
 
 *Real-time auction cards with live countdown timers, bid status indicators, and urgency color coding.*
@@ -381,7 +381,8 @@ graph TB
 ### Auction Room — Bidding Interface
 
 <p align="center">
-  <img src="screenshots/auction-room.png" alt="Auction room with live bid feed and countdown" width="800" />
+    <img width="1287" height="923" alt="Screenshot 2026-06-28 175132" src="https://github.com/user-attachments/assets/2d7f5552-058d-48e3-b3ed-a213a6d5ea8b" />
+<img width="1292" height="931" alt="Screenshot 2026-06-28 174810" src="https://github.com/user-attachments/assets/31de74e5-eb44-4b06-8cc8-5fa6d4698600" />
 </p>
 
 *Full auction room with IPFS-resolved NFT metadata, bid activity tracker, countdown with urgency animations, and claim/reclaim settlement actions.*
@@ -389,7 +390,9 @@ graph TB
 ### NFT Minting — IPFS Upload Flow
 
 <p align="center">
-  <img src="screenshots/mint-nft.png" alt="NFT minting form with IPFS upload" width="800" />
+ <img width="1870" height="867" alt="Screenshot 2026-06-28 174547" src="https://github.com/user-attachments/assets/59f19a05-de51-49fa-8f24-f0cc66b3c46c" />
+<img width="1587" height="933" alt="Screenshot 2026-06-28 174507" src="https://github.com/user-attachments/assets/8e11f8b9-be8f-449d-9abd-85027d2e0875" />
+
 </p>
 
 *Multi-phase minting pipeline: upload to IPFS, initialize contract, sign Soroban transaction, ledger confirmation.*
@@ -397,7 +400,8 @@ graph TB
 ### NFT Gallery — On-Chain Collection
 
 <p align="center">
-  <img src="screenshots/nft-gallery.png" alt="On-chain NFT gallery with IPFS metadata" width="800" />
+  <img width="1571" height="922" alt="Screenshot 2026-06-28 174612" src="https://github.com/user-attachments/assets/2d6bd10f-eb0d-49f6-a7dc-cdc045447917" />
+
 </p>
 
 *Scans token IDs 1-50 on-chain, resolves IPFS metadata, and displays owned NFTs with images and titles.*
@@ -405,11 +409,23 @@ graph TB
 ### Create Auction — Deployment Form
 
 <p align="center">
-  <img src="screenshots/create-auction.png" alt="Auction creation form with allowlist toggle" width="800" />
+  <img width="1512" height="923" alt="Screenshot 2026-06-28 174646" src="https://github.com/user-attachments/assets/4474b14d-00d8-4418-809b-a35026573fef" />
+
 </p>
 
 *Full-featured creation form with NFT gallery auto-fill, bid token selection, private auction toggle with allowlist, and deployment dashboard.*
 
+### CI/CD Pipeline — Vercel Deployment
+
+<p align="center">
+  <img width="1511" height="735" alt="Screenshot 2026-06-28 182707" src="https://github.com/user-attachments/assets/9e74c82c-9bad-4589-bf5c-7073df2ade33" />
+<img width="1880" height="931" alt="Screenshot 2026-06-28 182528" src="https://github.com/user-attachments/assets/e47da9c4-a081-4de0-ab78-502f41a72a22" />
+
+</p>
+
+*Deployment Dashboard and CI/CD.*
+
+---
 ---
 
 ## Core Engineering Architecture
