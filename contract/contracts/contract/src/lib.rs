@@ -82,8 +82,13 @@ impl Contract {
         env: Env, creator: Address, token: Address, token_id: i128, bid_token: Address,
         start_price: i128, min_bid_increment: i128, start_time: u64, end_time: u64,
         is_private: bool, allowlist: Vec<Address>,
-    ) -> u64 {
+    ) -> Result<u64, AuctionError> {
         creator.require_auth();
+
+        let now = env.ledger().timestamp();
+        if start_time >= end_time || end_time <= now {
+            return Err(AuctionError::NotActive);
+        }
 
         // Pull the NFT from the Creator into the Auction Escrow
         NFTClient::new(&env, &token).transfer_from(
@@ -106,7 +111,8 @@ impl Contract {
         env.storage().instance().set(&DataKey::NextId, &(id + 1));
 
         AuctionCreated { creator, auction_id: id, token_id, is_private }.publish(&env);
-        id
+        
+        Ok(id)
     }
 
     pub fn place_bid(env: Env, bidder: Address, auction_id: u64, amount: i128) -> Result<(), AuctionError> {
@@ -228,13 +234,31 @@ impl Contract {
         env.storage().persistent().get(&DataKey::Auction(auction_id)).ok_or(AuctionError::NotFound)
     }
 
-    // Secured Admin Cleanup Function
+    // Secured & Safe Admin Cleanup Function
     pub fn admin_delete_auction(env: Env, admin: Address, auction_id: u64) -> Result<(), AuctionError> {
         admin.require_auth();
 
-        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin).unwrap();
+        let stored_admin: Address = env.storage().instance().get(&DataKey::Admin)
+            .ok_or(AuctionError::NotAuthorized)?;
+            
         if admin != stored_admin {
             return Err(AuctionError::NotAuthorized);
+        }
+
+        let auction: Auction = env.storage().persistent().get(&DataKey::Auction(auction_id))
+            .ok_or(AuctionError::NotFound)?;
+
+        // Safety Measure: If the auction is live, refund the bidder and return the NFT
+        if !auction.ended && !auction.claimed {
+            if auction.highest_bid > 0 {
+                token::Client::new(&env, &auction.bid_token).transfer(
+                    &env.current_contract_address(), &auction.highest_bidder, &auction.highest_bid,
+                );
+            }
+            
+            NFTClient::new(&env, &auction.token).transfer(
+                &env.current_contract_address(), &auction.creator, &auction.token_id,
+            );
         }
 
         env.storage().persistent().remove(&DataKey::Auction(auction_id));
