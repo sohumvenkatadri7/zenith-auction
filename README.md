@@ -50,7 +50,7 @@
 | Requirement | Status | Implementation Details |
 |:---|:---:|:---|
 | **🛡️ 3 Error Types Handled** | ✅ | **Frontend:** `Simulation failed`, `Transaction failed`, `Wallet not connected`<br>**Contract:** `NotFound`, `NotActive`, `BidTooLow`, `NotOnAllowlist`, `AlreadyClaimed`, `NoBids`, `HasBids`, `NotEnded`, `NotWinner` (9 on-chain error variants) |
-| **🚀 Contract Deployed on Testnet** | ✅ | **Auction Protocol:** `CB3MSS4J3YZCJXKP67KTUN2SR6LPPK3XZCJUSTCZ7BFSMFHBMCMY7FTY`<br>**NFT Minting:** `CDVMGOJB2OUCJQXUKVCBMOXPQXYPTARRP4BDPZFDBIGTLGRLIIA5PB4P`<br>Network: Stellar Testnet |
+| **🚀 Contract Deployed on Testnet** | ✅ | **Auction Protocol:** `CBOWY2IVHYVG2WQKJV6D32IZIQMXLACNPU3MA4LVX5FRZ5SKCL27IMHZ`<br>**NFT Minting:** `CAIGJDU3F54SCETYVG25SIGDIVLQSYVB3DTPHCBULRPWC3SWSIJXLIK6`<br>Network: Stellar Testnet |
 | **📡 Contract Called from Frontend** | ✅ | `useAuction` hook orchestrates full Soroban transaction lifecycle:<br>• `create_auction` — Create and escrow NFTs<br>• `place_bid` — Submit bids with auto-refunds<br>• `claim_winning` — Winner claims NFT + funds<br>• `reclaim_unsold` — Creator reclaims unsold NFT |
 | **👁️ Transaction Status Visible** | ✅ | Real-time status tracking: `idle` → `submitting` → `success/error`<br>• Spinner animations during signing<br>• Error messages with detailed diagnostics<br>• Post-claim verification with TX hash and token balance |
 | **📝 2+ Meaningful Commits** | ✅ | Multiple commits covering:<br>• Core contract development<br>• Frontend scaffolding<br>• Bid tracking features<br>• NFT minting integration<br>• Wallet & UI improvements |
@@ -645,8 +645,8 @@ The wallet integration layer (`@creit.tech/stellar-wallets-kit` + `@stellar/frei
 
 | Contract | Address |
 |---|---|
-| **Auction Protocol** | `CB3MSS4J3YZCJXKP67KTUN2SR6LPPK3XZCJUSTCZ7BFSMFHBMCMY7FTY` |
-| **NFT Minting** | `CDVMGOJB2OUCJQXUKVCBMOXPQXYPTARRP4BDPZFDBIGTLGRLIIA5PB4P` |
+| **Auction Protocol** | `CBOWY2IVHYVG2WQKJV6D32IZIQMXLACNPU3MA4LVX5FRZ5SKCL27IMHZ` |
+| **NFT Minting** | `CAIGJDU3F54SCETYVG25SIGDIVLQSYVB3DTPHCBULRPWC3SWSIJXLIK6` |
 | **Network** | Stellar Testnet (`Test SDF Network ; September 2015`) |
 | **RPC** | `https://soroban-testnet.stellar.org` |
 
