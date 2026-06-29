@@ -61,7 +61,7 @@ function CreateAuctionInner() {
   const searchParams = useSearchParams();
   const { address } = useWalletStore();
   const { auctions, setError: clearGlobalError } = useAuctionStore();
-  const { createAuction, fetchAllAuctions, getNextId } = useAuction();
+  const { createAuction, fetchAllAuctions } = useAuction();
 
   // Read NFT params from URL
   const urlTokenId = searchParams.get("tokenId");
@@ -79,7 +79,7 @@ function CreateAuctionInner() {
   const [minBidIncrement, setMinBidIncrement] = useState("");
   const [startTime, setStartTime] = useState("");
   const [endTime, setEndTime] = useState("");
-  const [status, setStatus] = useState<"idle" | "submitting" | "success" | "error">("idle");
+  const [status, setStatus] = useState<"idle" | "submitting" | "parsing" | "success" | "error">("idle");
   const [message, setMessage] = useState("");
   const [messageType, setMessageType] = useState<"error" | "warning">("error");
   const [imgError, setImgError] = useState(false);
@@ -206,10 +206,11 @@ function CreateAuctionInner() {
         let retryCount = 0;
         const maxRetries = 3;
         let isSuccess = false;
+        let createResult: { txHash: string; auctionId: number } | null = null;
 
         while (retryCount < maxRetries && !isSuccess) {
           try {
-            await createAuction(
+            createResult = await createAuction(
               address,
               cleanTokenAddress,
               BigInt(tokenIdParsed),
@@ -235,12 +236,15 @@ function CreateAuctionInner() {
           }
         }
 
-        // Query the contract directly for the next ID, then subtract 1
-        // to get the ID of the auction we just created. This is reliable
-        // because submitTx already polled until SUCCESS before returning.
-        await new Promise(r => setTimeout(r, 3000)); // Allow ledger state to settle
-        const nextId = await getNextId();
-        const auctionId = nextId - 1;
+        // The auction ID is parsed directly from the create_auction
+        // contract return value — no stale-read needed.
+        setStatus("parsing");
+        setMessage("AUCTION CONFIRMED. PARSING AUCTION ID...");
+
+        if (!createResult || createResult.auctionId < 1) {
+          throw new Error("Failed to capture auction ID from transaction.");
+        }
+        const auctionId = createResult.auctionId;
 
         setStatus("success");
         setMessage(`AUCTION #${auctionId} CREATED. REDIRECTING...`);
@@ -259,7 +263,7 @@ function CreateAuctionInner() {
         console.error("RAW TX ERROR:", rawMsg);
       }
     },
-    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, minBidIncrement, startTime, endTime, isPrivate, allowlistInput, createAuction, fetchAllAuctions, getNextId, router, nftPreview, urlTokenId]
+    [address, tokenAddress, tokenIdInput, selectedBidToken, customBidToken, startPrice, minBidIncrement, startTime, endTime, isPrivate, allowlistInput, createAuction, fetchAllAuctions, router, nftPreview, urlTokenId]
   );
 
   const inputClass = "w-full border-2 border-[#1e1e2e] bg-[#0e0e16] px-4 py-3.5 font-mono text-sm text-[#e8e8f0] outline-none transition placeholder:text-[#44445a] disabled:opacity-50 focus:border-[#3b82f6]";
@@ -539,7 +543,13 @@ function CreateAuctionInner() {
             disabled={status === "submitting"}
             className="mt-2 border-2 border-[#3b82f6] bg-[#3b82f6] px-6 py-4 text-sm font-bold uppercase tracking-wider text-white shadow-[4px_4px_0px_0px_#1e40af] transition hover:translate-x-[-2px] hover:translate-y-[-2px] hover:shadow-[6px_6px_0px_0px_#1e40af] disabled:cursor-not-allowed disabled:opacity-60"
           >
-            {status === "submitting" ? "SUBMITTING TO BLOCKCHAIN..." : nftPreview ? "[ LIST NFT FOR AUCTION ]" : "[ CREATE AUCTION ]"}
+            {status === "submitting"
+              ? "SUBMITTING TO BLOCKCHAIN..."
+              : status === "parsing"
+                ? "PARSING AUCTION ID..."
+                : nftPreview
+                  ? "[ LIST NFT FOR AUCTION ]"
+                  : "[ CREATE AUCTION ]"}
           </button>
         </form>
       </div>

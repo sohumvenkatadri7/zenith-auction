@@ -78,6 +78,8 @@ function parseLedgerError(raw: string): string {
     return "TRANSACTION CANCELLED BY USER.";
   if (err.includes("NOTINITIALIZED"))
     return "NFT CONTRACT NOT INITIALIZED. CONTACT ADMIN.";
+  if (err.includes("ALREADYINITIALIZED"))
+    return "NFT CONTRACT ALREADY INITIALIZED. SKIPPING SETUP.";
   if (err.includes("NOTAUTHORIZED"))
     return "NOT AUTHORIZED: YOU MUST BE THE CONTRACT ADMIN TO MINT.";
   if (err.includes("TIMEOUT") || err.includes("NETWORK"))
@@ -96,6 +98,7 @@ function parseLedgerError(raw: string): string {
       case 2: return "NFT NOT FOUND: THIS TOKEN ID DOES NOT EXIST IN THE CONTRACT.";
       case 3: return "TOKEN ALREADY EXISTS.";
       case 4: return "NFT CONTRACT NOT INITIALIZED.";
+      case 5: return "NFT CONTRACT ALREADY INITIALIZED. SKIPPING SETUP.";
     }
   }
 
@@ -156,8 +159,8 @@ export function useNftMint(): UseNftMintReturn {
 
       if ("error" in sim) {
         const errMsg = String((sim as { error?: unknown }).error ?? "");
-        // Error #3 = TokenAlreadyExists — contract already initialized, fine to proceed
-        if (errMsg.includes("Error(Contract, #3)") || errMsg.includes("TokenAlreadyExists")) {
+        // Error #5 = AlreadyInitialized — contract already initialized, fine to proceed
+        if (errMsg.includes("Error(Contract, #5)") || errMsg.includes("AlreadyInitialized")) {
           console.log("NFT contract already initialized — skipping.");
           return "already-initialized";
         }

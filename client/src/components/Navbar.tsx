@@ -4,7 +4,7 @@ import Link from "next/link";
 import { useState, useEffect } from "react";
 import { useWalletStore } from "@/store/walletStore";
 import { useAuction } from "@/hooks/useAuction";
-import { DEFAULT_BID_TOKEN } from "@/lib/constants";
+import { DEFAULT_BID_TOKEN, ADMIN_WALLET } from "@/lib/constants";
 export default function Navbar() {
   const { address, isConnecting, error, disconnect, balanceRefreshTrigger } = useWalletStore();
   const connect = useWalletStore((s) => s.connect);
@@ -81,6 +81,14 @@ export default function Navbar() {
               >
                 MINT NFT
               </Link>
+              {address === ADMIN_WALLET && (
+                <Link
+                  href="/admin"
+                  className="border-2 border-transparent px-3 py-1.5 text-xs font-bold uppercase tracking-wider text-[#9898b0] transition hover:border-[#ef4444] hover:text-[#ef4444]"
+                >
+                  ADMIN
+                </Link>
+              )}
             </>
           )}
         </nav>
@@ -180,6 +188,15 @@ export default function Navbar() {
                 >
                   MINT NFT
                 </Link>
+                {address === ADMIN_WALLET && (
+                  <Link
+                    href="/admin"
+                    onClick={() => setMobileOpen(false)}
+                    className="border-2 border-[#ef4444] bg-[#ef4444]/10 px-4 py-2.5 text-xs font-bold uppercase tracking-wider text-[#ef4444]"
+                  >
+                    ADMIN
+                  </Link>
+                )}
               </>
             )}
           </nav>
