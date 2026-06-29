@@ -34,6 +34,10 @@
 - [Setup & Local Development](#-setup--local-development)
 - [Project Structure](#-project-structure)
 - [License](#-license)
+- ## Live Deployment Link : https://zenith-auction-2akl.vercel.app
+    
+
+
 
 ---
 
@@ -44,6 +48,7 @@
 **All core requirements successfully implemented and verified ✅**
 
 </div>
+
 
 <br>
 
@@ -228,7 +233,7 @@ fn test_error_bid_too_low() { /* ... */ }
 #[test]
 fn test_error_not_on_allowlist() { /* ... */ }
 
-// Snapshot tests for state verification
+
 ```
 
 **Frontend Testing Strategy:**
@@ -366,9 +371,6 @@ graph TB
 ---
 
 ## Screenshots & Preview
-
-> **Note:** Replace the paths below with actual screenshots from your running application.
-> Capture screenshots by running `npm run dev` in the `client/` directory and visiting each route.
 
 ### Home — Live Auction Feed
 
