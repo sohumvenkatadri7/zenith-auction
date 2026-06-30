@@ -34,7 +34,8 @@
 - [Setup & Local Development](#-setup--local-development)
 - [Project Structure](#-project-structure)
 - [License](#-license)
-- ## Live Deployment Link : https://zenith-auction-2akl.vercel.app
+- ## Live Deployment Link: https://zenith-auction-2akl.vercel.app
+- ## Demo Video Link: https://drive.google.com/drive/folders/1iVw-1kCOSY0ssVaMpXwAL5LEdW7bvFUT
     
 
 
