@@ -92,6 +92,30 @@
 | **Approval Pipeline** | Creator approves auction contract → Contract escrows NFT → Settlement transfers |
 | **Token Transfers** | Bid token refunds and settlements via Soroban token `Client::transfer()` |
 
+---
+
+## Contract Addresses (Testnet)
+
+| Contract | Address |
+|---|---|
+| **Auction Protocol** | `CBOWY2IVHYVG2WQKJV6D32IZIQMXLACNPU3MA4LVX5FRZ5SKCL27IMHZ` |
+| **NFT Minting** | `CAIGJDU3F54SCETYVG25SIGDIVLQSYVB3DTPHCBULRPWC3SWSIJXLIK6` |
+| **Network** | Stellar Testnet (`Test SDF Network ; September 2015`) |
+| **RPC** | `https://soroban-testnet.stellar.org` |
+
+## Auction Contract deployment transaction link: https://stellar.expert/explorer/testnet/tx/5d3aa613f777d8f353cd105df992608c307b916ce0cd5d39b0610ff88a0eccf1
+## NFT Contract deployment transaction link: https://stellar.expert/explorer/testnet/tx/7a2ba79103838fae8a50a6562e7a08dbce34287212df30854e9a080adb9bc830
+
+---
+<img width="1896" height="931" alt="image" src="https://github.com/user-attachments/assets/f4765c03-69c0-4b14-9356-1faeca456f2d" />
+<p align= "center"> Stellar Explorer screenshot of the transactions made in Auction contract </p>
+
+<img width="1905" height="931" alt="image" src="https://github.com/user-attachments/assets/6df5528a-a50b-49fe-855e-59db786587a5" />
+<p align= "center">Stellar Explorer screenshot of the transactions made in NFT Minting Contract</p>
+
+
+---
+
 ### 📡 Event Streaming & Real-Time Updates
 
 ```
@@ -644,16 +668,6 @@ The wallet integration layer (`@creit.tech/stellar-wallets-kit` + `@stellar/frei
 
 ---
 
-## Contract Addresses (Testnet)
-
-| Contract | Address |
-|---|---|
-| **Auction Protocol** | `CBOWY2IVHYVG2WQKJV6D32IZIQMXLACNPU3MA4LVX5FRZ5SKCL27IMHZ` |
-| **NFT Minting** | `CAIGJDU3F54SCETYVG25SIGDIVLQSYVB3DTPHCBULRPWC3SWSIJXLIK6` |
-| **Network** | Stellar Testnet (`Test SDF Network ; September 2015`) |
-| **RPC** | `https://soroban-testnet.stellar.org` |
-
----
 
 ## Smart Contract API Reference
 
